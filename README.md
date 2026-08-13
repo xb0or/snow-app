@@ -35,6 +35,7 @@ Snow App is a developer-focused desktop application that integrates AI-powered c
 - **Config Import** - Import MCP servers, skills, plugins, and prompts from Codex / WSL / SSH environments
 - **i18n** - Multi-language support with a locale system
 - **Settings Management** - Granular configuration for API keys, custom headers, proxy, sensitive commands, and more
+- **Data Management** - Password-protected configuration packages, SQLite Online Backup snapshots, safe restart restore, and encrypted WebDAV configuration or full-database mirror sync
 - **Cross-Platform** - Runs on macOS, Windows, and Linux
 
 ## Tech Stack

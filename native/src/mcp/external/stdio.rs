@@ -4,7 +4,6 @@ use std::process::Stdio;
 use napi::{Error, Result};
 use rmcp::model::ClientInfo;
 use rmcp::service::{ClientLifecycleMode, ClientServiceExt, RunningService};
-use tokio::process::Command;
 
 use crate::exports::terminal::{detect_shell_family, resolve_login_path};
 use crate::storage::McpServerConfigRecord;
@@ -179,7 +178,7 @@ async fn spawn_transport(
     #[cfg(not(target_os = "windows"))]
     let (actual_command, prefix_args) = (command_name.to_string(), Vec::<String>::new());
 
-    let mut command = Command::new(&actual_command);
+    let mut command = crate::utils::process::cmd_async(&actual_command);
     command.args(&prefix_args);
     command.args(args);
 
@@ -189,12 +188,6 @@ async fn spawn_transport(
 
     // 配置里显式声明的 env 最后注入，覆盖 login PATH（如用户自定义 PATH）。
     command.envs(environment);
-
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
 
     // Use the builder so we can pipe stderr for diagnostics while keeping
     // stdin/stdout piped (the defaults).

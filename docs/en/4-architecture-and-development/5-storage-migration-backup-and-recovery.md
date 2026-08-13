@@ -1,6 +1,6 @@
 # Storage, Migration, Backup, and Recovery
 
-> This document covers Snow App persistence domains, the SQLite schema lifecycle, best-effort recovery, atomic config writes, and image-library directory migration. No one-click complete backup/restore API was confirmed in the project; those sections describe offline operational procedures.
+> This document covers Snow App persistence domains, the SQLite schema lifecycle, best-effort recovery, atomic config writes, image-library directory migration, and the online snapshot, package, and restore flows exposed by Data management.
 
 ## 1. Storage Domain Component View
 
@@ -55,7 +55,7 @@ At runtime, `snowapp.db-wal` may contain committed transactions not yet checkpoi
 
 The direct `create_schema` batch currently creates 20 tables, followed by `image_library::ensure_image_library_table`, for **21 core business tables including `image_library`**. Auxiliary tables such as `codebase_embed_sessions` and per-project dynamic codebase-index tables are outside those 21 direct core tables.
 
-The current `PRAGMA user_version` is 26. New tables belong in the current schema; new columns/indexes and old-structure conversions belong in migrations. Every migration must be idempotent, followed by a `user_version` bump. Never edit the database or change `user_version` manually to bypass migrations.
+The current `PRAGMA user_version` is 31. New tables belong in the current schema; new columns/indexes and old-structure conversions belong in migrations. Every migration must be idempotent, followed by a `user_version` bump. Never edit the database or change `user_version` manually to bypass migrations.
 
 ## 5. Two-Phase Migration
 
@@ -66,7 +66,7 @@ flowchart TD
     core["CREATE TABLE IF NOT EXISTS core batch"]
     aux["Ensure codebase session and image_library tables"]
     post["run_post_schema_migrations"]
-    version["Set PRAGMA user_version = 26"]
+    version["Set PRAGMA user_version = 31"]
     ready["Storage ready"]
 
     open --> pre --> core --> aux --> post --> version --> ready
@@ -97,7 +97,7 @@ sequenceDiagram
         Old-->>E: row values
         E->>New: INSERT OR IGNORE
     end
-    E->>New: run post-schema migrations and set version 26
+    E->>New: run post-schema migrations and set version 31
     E->>FS: remove old WAL and SHM sidecars
     E->>FS: rename old DB to corrupt timestamp backup
     E->>FS: rename recovered DB to snowapp.db
@@ -157,7 +157,21 @@ stateDiagram-v2
 
 `rollback_migration` deletes copies under the new root and preserves originals. During storage initialization, `recover_interrupted_migration` checks whether settings already point to the new root: a committed migration finishes old-file cleanup, while an uncommitted migration removes copies. A corrupt journal is discarded and logged. IPC channels are `images:library-migrate-prepare/chunk/commit/rollback`.
 
-## 9. Consistent Backup Checklist
+## 9. Online Snapshots, Configuration Packages, and Restore
+
+The **Data management** entry is at the top of Settings and has three tabs:
+
+- **Import & export** creates a `.snow-config` ZIP package. API keys, MCP env/headers, proxy passwords, SSH paths, and system credentials are excluded by default. Including sensitive configuration requires a password; the package uses Argon2id key derivation and AES-256-GCM encryption.
+- **Backup & restore** uses SQLite Online Backup in Rust to copy `snowapp.db` and the optional `archive.db`, runs `quick_check` on the copies, and atomically commits a manifest, SHA-256 checked `.snowbackup` container. Automatic schedules support 6-hour, 12-hour, daily, and weekly intervals with 3–100 retained snapshots.
+- **Cloud sync** supports encrypted WebDAV configuration sync and a full database mirror. Objects are encrypted before upload; `state.json` uses revision plus ETag or a second-read check. A pulled mirror is staged and applied before storage initialization after restart.
+
+Restore never replaces a live SQLite file. The backend validates the manifest, hashes, and `quick_check`, writes `userData/data-management/pending-restore.json`, and requests a restart. On the next startup, before storage initialization, it validates staging, preserves the pre-restore databases, removes WAL/SHM sidecars, and swaps the files. If initialization fails, the rollback copy restores the previous state. A pending restore continues to use its recorded, validated backup directory even if the user changes the setting later.
+
+Full mirror is an advanced mode that changes the local conversations and archive database; configuration sync is intended for routine multi-device use. This release does not place checkpoints, uploads, image-library files, plugin runtime directories, or attachments into `.snowbackup`, and never cross-device restores SSH credentials, browser passwords, cookies, system keys, or absolute workspace paths. Attachment sync and remote historical-object cleanup remain future extensions.
+
+KDF parameters are public package/envelope metadata; passwords, derived keys, and WebDAV Authorization headers remain in the main process. WebDAV rejects HTTP by default; explicitly enabling the high-risk option is required for an unencrypted endpoint. Servers without ETags are marked as having weak conflict protection.
+
+## 10. Consistent Backup Checklist
 
 Recommended offline backup:
 
@@ -181,9 +195,9 @@ flowchart LR
     stop --> appdata --> config --> optional --> manifest --> archive
 ```
 
-If online backup becomes a requirement, implement SQLite's backup API or a controlled checkpoint flow instead of ad hoc copying of main, WAL, and SHM files. No such project feature was confirmed here.
+When the Data management page is not used, follow this offline procedure. Do not assemble a live backup by concatenating the main database, WAL, and SHM files. The online snapshot implementation is anchored at `native/src/storage/services/data_management.rs`.
 
-## 10. Restore Procedure
+## 11. Restore Procedure
 
 1. Keep Snow App fully stopped.
 2. First save the current `~/.snowapp/`, `~/.snow/`, and relevant custom directories so the only usable copy is not overwritten.
@@ -195,7 +209,7 @@ If online backup becomes a requirement, implement SQLite's backup API or a contr
 
 Restoring old-version data into a newer version allows forward migrations to run. Giving a newer database directly to an older app has no compatibility guarantee. Cross-machine restore also requires revalidating absolute paths, SSH credentials, and OS-specific settings.
 
-## 11. Failure Scenarios and Prohibitions
+## 12. Failure Scenarios and Prohibitions
 
 | Scenario | Correct response |
 |---|---|
@@ -206,7 +220,7 @@ Restoring old-version data into a newer version allows forward migrations to run
 | Image migration is interrupted | Let journal recovery determine commit or rollback at next initialization |
 | Open a new DB in an old app | Use a matching version or validate compatibility; migrations are not assumed reversible |
 
-## 12. Source Anchors
+## 13. Source Anchors
 
 | Topic | File or function |
 |---|---|

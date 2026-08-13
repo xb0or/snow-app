@@ -8,7 +8,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 use crate::exports::terminal::{load_terminal_shell_path, resolve_shell_and_args};
 use crate::storage::services::app_logs;
@@ -389,7 +388,7 @@ async fn execute_command_action(
     let cwd_str = cwd.as_deref().and_then(Path::to_str);
     let (shell, shell_args) = resolve_shell_and_args(&shell_path, command, cwd_str).await?;
 
-    let mut shell_command = Command::new(&shell);
+    let mut shell_command = crate::utils::process::cmd_async(&shell);
     shell_command
         .args(&shell_args)
         .stdin(Stdio::piped())
@@ -401,13 +400,6 @@ async fn execute_command_action(
 
     if let Some(ref dir) = cwd {
         shell_command.current_dir(dir);
-    }
-
-    // Windows 下避免 spawn 子进程时弹出控制台窗口闪烁
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        shell_command.creation_flags(CREATE_NO_WINDOW);
     }
 
     let mut child = shell_command.spawn().map_err(|error| {

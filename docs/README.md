@@ -32,6 +32,7 @@
 | [2-使用指南/19-个性化主题与快捷键](zh-CN/2-使用指南/19-个性化主题与快捷键.md)     | [2-guides/19-personalization-theme-and-shortcuts](en/2-guides/19-personalization-theme-and-shortcuts.md)                       | 个性化与快捷键 / Personalization & shortcuts        |
 | [2-使用指南/20-用量统计与系统日志](zh-CN/2-使用指南/20-用量统计与系统日志.md)      | [2-guides/20-usage-statistics-and-system-logs](en/2-guides/20-usage-statistics-and-system-logs.md)                             | 用量与日志 / Usage & logs                           |
 | [2-使用指南/21-创建与编写 Skills](zh-CN/2-使用指南/21-创建与编写Skills.md)         | [2-guides/21-create-and-author-skills](en/2-guides/21-create-and-author-skills.md)                                             | Skills 创建与编写 / Create & author Skills          |
+| [2-使用指南/22-数据管理、备份与 WebDAV 同步](zh-CN/2-使用指南/22-数据管理备份与WebDAV同步.md) | [2-guides/22-data-management-backup-and-webdav-sync](en/2-guides/22-data-management-backup-and-webdav-sync.md) | 数据管理、备份恢复与同步 / Data management, backup, restore & sync |
 | [3-参考手册/1-settings.json 配置参考](zh-CN/3-参考手册/1-settings.json配置参考.md) | [3-reference/1-settings-json-reference](en/3-reference/1-settings-json-reference.md)                                           | settings.json 字段参考 / settings.json reference    |
 | [3-参考手册/2-内置工具参考](zh-CN/3-参考手册/2-内置工具参考.md)                    | [3-reference/2-builtin-tools-reference](en/3-reference/2-builtin-tools-reference.md)                                           | 内置工具参考 / Built-in tools reference             |
 | [3-参考手册/3-配置文件字段参考](zh-CN/3-参考手册/3-配置文件字段参考.md)            | [3-reference/3-config-file-field-reference](en/3-reference/3-config-file-field-reference.md)                                   | 全部配置文件字段 / All config file fields           |
@@ -46,7 +47,7 @@
 
 ## 文档覆盖与维护 / Coverage & Maintenance
 
-- [功能文档覆盖审计 / Feature Documentation Coverage Audit](FEATURE_COVERAGE.md)：功能、21 个设置页、工具域、平台能力到代码和双语文档的覆盖矩阵。
+- [功能文档覆盖审计 / Feature Documentation Coverage Audit](FEATURE_COVERAGE.md)：功能、22 个设置页、工具域、平台能力到代码和双语文档的覆盖矩阵。
 - [文档治理指南 / Documentation Governance Guide](DOCUMENTATION_GUIDE.md)：信息架构、双语同步、代码锚点、Mermaid 规范与功能变更完成标准。
 - 任何产品功能变更都必须同步更新对应中英文文档、覆盖矩阵与本索引，并运行 `npm run check:docs`。
 

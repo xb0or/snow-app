@@ -3316,4 +3316,71 @@ export const en = {
   "settings.systemPromptListTitle": "Prompt list",
   "settings.themeBackgroundDeleteError": "Failed to delete background image",
   "settings.usageRefresh": "Refresh usage data",
+  "settings.dataManagement": "Data management",
+  "settings.dataManagementInfo":
+    "Portable settings, database snapshots and encrypted multi-device sync.",
+  "settings.dataManagementClosePanel": "Close data management",
+  "settings.dataManagementImportExportTab": "Import & export",
+  "settings.dataManagementBackupRestoreTab": "Backup & restore",
+  "settings.dataManagementCloudSyncTab": "Cloud sync",
+  "settings.dataManagementPhase0": "Phase 0",
+  "settings.dataManagementPhase1": "Phase 1",
+  "settings.dataManagementPhase3": "Phase 3",
+  "settings.dataManagementImportExportTitle": "Portable configuration packages",
+  "settings.dataManagementImportExportInfo":
+    "Move selected Snow App settings between installations without copying sessions or device-specific credentials.",
+  "settings.dataManagementExport": "Export configuration",
+  "settings.dataManagementExportInfo":
+    "The export flow will create a .snow-config package with a versioned manifest and per-file hashes.",
+  "settings.dataManagementImport": "Import configuration",
+  "settings.dataManagementImportInfo":
+    "Before writing anything, the importer will validate hashes, reject unsafe paths and create a safety snapshot.",
+  "settings.dataManagementComingPhase2": "Available in Phase 2",
+  "settings.dataManagementPackageRules": "Package rules",
+  "settings.dataManagementManifestVersion": "Manifest v{{version}}",
+  "settings.dataManagementSecretRule":
+    "Secrets are excluded by default and can only be included in an encrypted package.",
+  "settings.dataManagementDeviceRule":
+    "Workspace paths, SSH keys and system credentials stay device-local.",
+  "settings.dataManagementSections": "Portable sections in manifest v1",
+  "settings.dataManagementBackupTitle": "Database snapshots and recovery",
+  "settings.dataManagementBackupInfo":
+    "Snapshots will use SQLite Online Backup so WAL writes remain consistent while the app is running.",
+  "settings.dataManagementSnapshotScope": "Snapshot scope",
+  "settings.dataManagementMainDatabase": "Main application database",
+  "settings.dataManagementArchiveDatabase": "Archived conversations",
+  "settings.dataManagementIncluded": "Included",
+  "settings.dataManagementManualSnapshot": "Create a snapshot",
+  "settings.dataManagementManualSnapshotInfo":
+    "Manual and automatic backup scheduling will be added with the staging and integrity-check pipeline.",
+  "settings.dataManagementComingPhase1": "Available in Phase 1",
+  "settings.dataManagementRestore": "Restore safely",
+  "settings.dataManagementRestoreInfo":
+    "Restoration will be staged and applied before storage initialization after an explicit app restart.",
+  "settings.dataManagementNoActiveTask": "No active task",
+  "settings.dataManagementCloudTitle": "WebDAV cloud sync",
+  "settings.dataManagementCloudInfo":
+    "Configuration sync will keep encrypted objects on your WebDAV server and coordinate changes with revisions and ETags.",
+  "settings.dataManagementDeviceIdentity": "This device",
+  "settings.dataManagementDeviceName": "Device name",
+  "settings.dataManagementDeviceNamePlaceholder": "Snow App",
+  "settings.dataManagementWebDavConnection": "WebDAV connection",
+  "settings.dataManagementConfigurationOnly": "Configuration only",
+  "settings.dataManagementEndpoint": "Endpoint",
+  "settings.dataManagementRemoteRoot": "Remote root",
+  "settings.dataManagementUsername": "Username",
+  "settings.dataManagementPasswordLater":
+    "The password and sync encryption key will be saved through OS-level secure storage in a later phase.",
+  "settings.dataManagementSaved": "Saved",
+  "settings.dataManagementSave": "Save",
+  "settings.dataManagementSecureStorageReady":
+    "Secure credential storage is available",
+  "settings.dataManagementSecureStorageUnavailable":
+    "Secure credential storage is unavailable",
+  "settings.dataManagementPasswordConfigured":
+    "A WebDAV password is configured locally.",
+  "settings.dataManagementPasswordNotConfigured": "No WebDAV password is stored.",
+  "settings.dataManagementTaskCompleted": "Task completed",
+  "settings.dataManagementTaskCancelled": "Task cancelled",
+  "settings.dataManagementTaskFailed": "Task failed",
 } satisfies Record<string, string>;

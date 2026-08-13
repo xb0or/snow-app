@@ -149,12 +149,16 @@ pub(super) fn build_chat_completions_payload(
                     }
                     // Round-trip reasoning_content for DeepSeek/OpenAI
                     // thinking models so the AI retains its prior
-                    // reasoning across turns.
-                    if let Some(ref thinking) = message.thinking {
-                        if !thinking.is_empty() {
-                            assistant_msg["reasoning_content"] = json!(thinking);
-                        }
-                    }
+                    // reasoning across turns. DeepSeek V4 thinking mode
+                    // (enabled by default) REQUIRES this field on every
+                    // assistant message that carries tool_calls whenever
+                    // the request also carries `tools` — a missing field
+                    // yields a 400 "The reasoning_content in the thinking
+                    // mode must be passed back to the API". An empty
+                    // string is accepted when the turn produced no
+                    // reasoning text.
+                    assistant_msg["reasoning_content"] =
+                        json!(message.thinking.as_deref().unwrap_or(""));
                     payload_messages.push(assistant_msg);
                     continue;
                 }

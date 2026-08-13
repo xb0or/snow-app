@@ -1758,9 +1758,11 @@ pub fn delete_conversations(conversation_ids: Vec<String>) -> Result<()> {
 }
 
 pub fn archive_conversations(conversation_ids: Vec<String>) -> Result<()> {
-    let database_path = ensure_database_file()?;
-    let archive_path = ensure_archive_database_file()?;
-    services::archive::archive_conversations(&database_path, &archive_path, &conversation_ids)
+    with_data_management_lock(|| {
+        let database_path = ensure_database_file()?;
+        let archive_path = ensure_archive_database_file()?;
+        services::archive::archive_conversations(&database_path, &archive_path, &conversation_ids)
+    })
 }
 
 pub fn list_archived_conversations_paginated(
@@ -1778,18 +1780,22 @@ pub fn list_archived_conversations_paginated(
 }
 
 pub fn restore_archived_conversations(conversation_ids: Vec<String>) -> Result<()> {
-    let database_path = ensure_database_file()?;
-    let archive_path = ensure_archive_database_file()?;
-    services::archive::restore_archived_conversations(
-        &database_path,
-        &archive_path,
-        &conversation_ids,
-    )
+    with_data_management_lock(|| {
+        let database_path = ensure_database_file()?;
+        let archive_path = ensure_archive_database_file()?;
+        services::archive::restore_archived_conversations(
+            &database_path,
+            &archive_path,
+            &conversation_ids,
+        )
+    })
 }
 
 pub fn delete_archived_conversations(conversation_ids: Vec<String>) -> Result<()> {
-    let archive_path = ensure_archive_database_file()?;
-    services::archive::delete_archived_conversations(&archive_path, &conversation_ids)
+    with_data_management_lock(|| {
+        let archive_path = ensure_archive_database_file()?;
+        services::archive::delete_archived_conversations(&archive_path, &conversation_ids)
+    })
 }
 
 pub fn append_tool_message(conversation_id: String, content: String) -> Result<()> {
@@ -1958,6 +1964,18 @@ pub fn clear_app_logs() -> Result<u32> {
 
 /// Cached database path after the first successful initialization.
 static DATABASE_PATH_CACHE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Serializes operations that span the live database and archive database.
+/// Online Backup keeps one SQLite file consistent; this lock keeps the pair
+/// consistent when an archive move is in flight.
+static DATA_MANAGEMENT_MUTEX: Mutex<()> = Mutex::new(());
+
+pub(crate) fn with_data_management_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    let _guard = DATA_MANAGEMENT_MUTEX
+        .lock()
+        .map_err(|_| Error::from_reason("Snow App data management mutex poisoned"))?;
+    operation()
+}
 
 /// Serializes the first-time initialization so that even if multiple
 /// `spawn_blocking` tasks call `ensure_database_file()` concurrently at

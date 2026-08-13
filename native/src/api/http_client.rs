@@ -202,7 +202,9 @@ fn windows_nt_version() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn reg_query_value(subkey: &str, name: &str) -> Option<String> {
-    let output = std::process::Command::new("reg")
+    // 统一经 utils::process::cmd 创建：Windows 下自动携带
+    // CREATE_NO_WINDOW，避免 spawn reg.exe 时控制台窗口一闪而过。
+    let output = crate::utils::process::cmd("reg")
         .args(["query", subkey, "/v", name])
         .output()
         .ok()?;

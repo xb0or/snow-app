@@ -30,6 +30,14 @@ export type AppStorageInfo = {
   archiveDatabasePath: string;
 };
 
+export type DatabaseBackupInfo = {
+  databasePath: string;
+  archiveDatabasePath?: string;
+  schemaVersion: number;
+  databaseSizeBytes: number;
+  archiveDatabaseSizeBytes?: number;
+};
+
 export type ApiConfigInput = {
   profileName: string;
   displayName: string;
@@ -1156,6 +1164,21 @@ export type CheckpointFileDiff = CheckpointFileChange & {
 
 export type NativeBridge = {
   initializeAppStorage: () => Promise<AppStorageInfo>;
+  createDatabaseOnlineBackup: (
+    mainDestination: string,
+    archiveDestination: string | undefined,
+    includeArchive: boolean
+  ) => Promise<DatabaseBackupInfo>;
+  quickCheckDatabase: (path: string) => Promise<string>;
+  exportDataManagementConfig: (
+    sectionsJson: string,
+    includeSecrets: boolean
+  ) => Promise<string>;
+  applyDataManagementConfig: (
+    configJson: string,
+    sectionsJson: string,
+    replaceSelected: boolean
+  ) => Promise<void>;
 
   getSystemSettingValue: (settingCode: string) => Promise<string | null>;
   setSystemSetting: (

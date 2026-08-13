@@ -56,7 +56,7 @@ Treat database backups as sensitive because one file can contain credentials, pr
 
 ### 1.2 Schema, Migrations, and Version
 
-The current source sets `PRAGMA user_version` to 26. Initialization runs in this order:
+The current source sets `PRAGMA user_version` to 31. Initialization runs in this order:
 
 1. pre-schema migrations;
 2. `CREATE TABLE IF NOT EXISTS` statements;

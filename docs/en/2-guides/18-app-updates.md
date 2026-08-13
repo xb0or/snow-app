@@ -4,7 +4,7 @@ Snow App checks for new versions automatically but does not silently download or
 
 ## 1. Update entry point and status
 
-Open Settings and scroll to the **About** area at the bottom of the Settings sidebar to view the current version and update status. **About** is a separate sidebar information area rather than one of the 21 settings pages. The UI can expose:
+Open Settings and scroll to the **About** area at the bottom of the Settings sidebar to view the current version and update status. **About** is a separate sidebar information area rather than one of the 22 settings pages. The UI can expose:
 
 | State | Meaning |
 | --- | --- |

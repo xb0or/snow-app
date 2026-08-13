@@ -17,7 +17,6 @@ use napi_derive::napi;
 use regex::Regex;
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command;
 
 use super::super::service::McpService;
 use super::super::tools::McpTool;
@@ -26,7 +25,7 @@ use super::remote_workspace::{
     RemoteWorkspaceCallback,
 };
 
-fn set_inherited_env_default(process: &mut Command, key: &str, value: &str) {
+fn set_inherited_env_default(process: &mut tokio::process::Command, key: &str, value: &str) {
     if value.is_empty() || std::env::var_os(key).is_some() {
         return;
     }
@@ -544,7 +543,7 @@ impl BashService {
         };
         let login_path_ms = login_path_started.elapsed().as_millis() as u64;
 
-        let mut process = Command::new(&shell);
+        let mut process = crate::utils::process::cmd_async(&shell);
         process
             .args(&shell_args)
             .current_dir(&working_directory)
@@ -603,12 +602,6 @@ impl BashService {
 
         if let Some(ref path) = login_path {
             process.env("PATH", path);
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            process.creation_flags(CREATE_NO_WINDOW);
         }
 
         // On Unix, place the child in its own process group so that
@@ -1033,13 +1026,11 @@ async fn kill_process_tree(child: &mut tokio::process::Child) {
     if let Some(pid) = child.id() {
         #[cfg(target_os = "windows")]
         {
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
             // /T = kill entire process tree, /F = force kill. Do not await this
             // command indefinitely: a broken taskkill must never block the
             // safety-critical cancellation path.
-            let killer = tokio::process::Command::new("taskkill")
+            let killer = crate::utils::process::cmd_async("taskkill")
                 .args(["/T", "/F", "/PID", &pid.to_string()])
-                .creation_flags(CREATE_NO_WINDOW)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

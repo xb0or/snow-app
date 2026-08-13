@@ -1,6 +1,6 @@
 # 19-Personalization, Theme, and Shortcuts
 
-> This guide explains Snow App's rule composition, request configuration, theme, language, and keyboard-shortcut behavior. The Settings sidebar currently contains 21 settings pages; this guide covers System Prompt (settings page id: `system-prompt-settings`), Personalization (`personalization-settings`), Custom Headers (`custom-headers-settings`), Theme Settings (`theme-settings`), and Keyboard Shortcuts (`keyboard-shortcuts-settings`). The language selector is a separate area below the settings list, not a twenty-second page.
+> This guide explains Snow App's rule composition, request configuration, theme, language, and keyboard-shortcut behavior. The Settings sidebar currently contains 22 settings pages; this guide covers System Prompt (settings page id: `system-prompt-settings`), Personalization (`personalization-settings`), Custom Headers (`custom-headers-settings`), Theme Settings (`theme-settings`), and Keyboard Shortcuts (`keyboard-shortcuts-settings`). The language selector is a separate area below the settings list, not a twenty-third page.
 
 ## Configuration Flow and Effective Boundaries
 

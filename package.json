@@ -1,6 +1,6 @@
 {
   "name": "snow-app",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Snow App The best AI Agent client in the universe",
   "author": {
     "name": "MayDay",
@@ -26,7 +26,7 @@
     "check": "npm run check:ts && cargo check --manifest-path native/Cargo.toml",
     "check:docs": "node scripts/check-docs.cjs",
     "check:ts": "tsc --noEmit",
-    "test:ts": "tsx --test \"src/**/*.test.ts\"",
+    "test:ts": "node --import tsx --test \"src/**/*.test.ts\"",
     "preview": "electron-vite preview"
   },
   "dependencies": {
@@ -36,6 +36,7 @@
     "@git-diff-view/react": "^0.1.7",
     "@iarna/toml": "^2.2.5",
     "@napi-rs/triples": "^1.2.0",
+    "@noble/hashes": "^2.2.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",

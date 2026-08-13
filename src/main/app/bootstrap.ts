@@ -25,6 +25,14 @@ import {
 import { installWebviewContextMenu } from "../utils/webviewContextMenu";
 import { initBrowserPopupHandler } from "../browser/browserPopupWindow";
 import { disposePetWindow, restorePetWindow } from "../pets/petWindow";
+import { dataManagementCoordinator } from "../dataManagement/dataManagementCoordinator";
+import {
+  applyPendingRestore,
+  cleanupStaleBackupStaging,
+  finalizePendingRestore,
+  rollbackPendingRestore,
+  type AppliedRestore,
+} from "../dataManagement/backupService";
 
 export const bootstrapApplication = (): void => {
   // ─── Chromium 启动加速开关（必须在 whenReady 之前）─────────────────────
@@ -160,10 +168,35 @@ export const bootstrapApplication = (): void => {
     // 等待 did-finish-load 确保 boot-loader HTML 已完成渲染，
     // 用户已看到 loading 动画后再执行阻塞操作。
     mainWindow.webContents.once("did-finish-load", () => {
-      // Initialise storage — use raw binding to avoid storageReady deadlock.
-      initializeApplicationServices(getRawNative())
-        .then(() => restorePetWindow(native))
-        .catch((error) => {
+      // A pending database restore must happen before the first native storage
+      // initialization. The raw binding is intentionally used here so the
+      // restore check does not wait on storageReady (which is what it is about
+      // to establish).
+      const rawNative = getRawNative();
+      void (async () => {
+        let appliedRestore: AppliedRestore | null = null;
+        let storageInitialized = false;
+        try {
+          cleanupStaleBackupStaging();
+          appliedRestore = await applyPendingRestore(rawNative);
+          await initializeApplicationServices(rawNative);
+          storageInitialized = true;
+          dataManagementCoordinator.start(native);
+          if (appliedRestore) {
+            finalizePendingRestore(appliedRestore);
+          }
+          await restorePetWindow(native);
+        } catch (error) {
+          // Once storage initialization succeeds, the restored databases are
+          // live. A later cleanup/UI failure must leave them in place so the
+          // next startup can retry finalizing the pending marker.
+          if (appliedRestore && !storageInitialized) {
+            try {
+              rollbackPendingRestore(appliedRestore);
+            } catch (rollbackError) {
+              console.error("Failed to roll back pending restore:", rollbackError);
+            }
+          }
           console.error("Failed to initialize application storage:", error);
           snowLog.error({
             module: "app/bootstrap",
@@ -171,7 +204,8 @@ export const bootstrapApplication = (): void => {
             message: "Failed to initialize application storage",
             error: error instanceof Error ? error.message : String(error),
           });
-        });
+        }
+      })();
 
       // 启动时应用会话代理，使 net.fetch / electron-updater 走内置代理配置。
       void applySessionProxy(native);
@@ -231,7 +265,8 @@ export const bootstrapApplication = (): void => {
   });
 
   // 退出前销毁宠物窗口，避免残留透明置顶窗口。
-  app.on("before-quit", () => {
-    disposePetWindow();
-  });
+    app.on("before-quit", () => {
+      dataManagementCoordinator.stop();
+      disposePetWindow();
+    });
 };

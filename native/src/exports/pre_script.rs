@@ -4,7 +4,6 @@ use std::time::Duration;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::Value;
-use tokio::process::Command;
 use tokio::time::timeout;
 
 use super::terminal::{
@@ -52,7 +51,7 @@ pub async fn run_pre_script(
 
     let extra_env = parse_env_json(env_json.as_deref());
 
-    let mut process = Command::new(&shell);
+    let mut process = crate::utils::process::cmd_async(&shell);
     process
         .args(&shell_args)
         .current_dir(&cwd)

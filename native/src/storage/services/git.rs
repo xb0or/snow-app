@@ -4,12 +4,6 @@ use std::process::Command;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 use crate::exports::terminal::{detect_shell_family, load_terminal_shell_path_sync};
 
 /// Git 可执行文件缺失时给用户的明确提示，避免与误导性的
@@ -58,12 +52,12 @@ fn build_git_command(repo_path: &str, args: &[&str]) -> Command {
         .map(|a| shell_quote(a))
         .collect::<Vec<String>>()
         .join(" ");
-        let mut cmd = Command::new(&shell_path);
+        let mut cmd = crate::utils::process::cmd(&shell_path);
         cmd.arg("--cd").arg(wsl_cd_path(repo_path));
         cmd.args(["-e", "bash", "-lc", &git_cmd]);
         cmd
     } else {
-        let mut cmd = Command::new("git");
+        let mut cmd = crate::utils::process::cmd("git");
         cmd.args(["-c", "core.quotepath=false", "-c", "safe.directory=*"])
             .args(args)
             .current_dir(repo_path);
@@ -172,9 +166,6 @@ fn run_git(repo_path: &str, args: &[&str]) -> Result<String> {
     // WSL (`\\wsl$\...`) or other network/UNC paths because the repo files
     // are owned by the Linux user, not the current Windows user.
 
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-
     let output = cmd.output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             // git (or the configured WSL shell) is not installed — surface
@@ -203,9 +194,6 @@ fn run_git(repo_path: &str, args: &[&str]) -> Result<String> {
 fn run_git_raw(repo_path: &str, args: &[&str]) -> Result<String> {
     let mut cmd = build_git_command(repo_path, args);
     // Same `safe.directory=*` bypass as `run_git` — see its comment.
-
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
 
     let output = cmd.output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {

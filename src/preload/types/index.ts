@@ -19,3 +19,4 @@ export type * from "./imageLibrary";
 export type * from "./storage";
 export type * from "./ide";
 export type * from "./pets";
+export type * from "./dataManagement";

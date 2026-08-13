@@ -47,6 +47,22 @@ export const loadNativeBridge = (): NativeBridge => {
             "Rust native bridge is required to initialize Snow App storage"
           )
         ),
+      createDatabaseOnlineBackup: () =>
+        Promise.reject(
+          new Error("Rust native bridge is required to create database backups")
+        ),
+      quickCheckDatabase: () =>
+        Promise.reject(
+          new Error("Rust native bridge is required to validate databases")
+        ),
+      exportDataManagementConfig: () =>
+        Promise.reject(
+          new Error("Rust native bridge is required to export configuration")
+        ),
+      applyDataManagementConfig: () =>
+        Promise.reject(
+          new Error("Rust native bridge is required to import configuration")
+        ),
       getSystemSettingValue: () =>
         Promise.reject(
           new Error("Rust native bridge is required to read system settings")

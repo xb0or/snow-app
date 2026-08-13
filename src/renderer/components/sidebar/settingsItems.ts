@@ -2,6 +2,7 @@ import {
   ChartColumn,
   Compass,
   Database,
+  DatabaseBackup,
   Download,
   EyeOff,
   FishingHook,
@@ -39,6 +40,13 @@ export type SettingsItem = {
 };
 
 export const SETTINGS_ITEMS: SettingsItem[] = [
+  {
+    id: "data-management",
+    icon: DatabaseBackup,
+    labelKey: "settings.dataManagement",
+    defaultLabel: "Data management",
+    view: "data-management-settings",
+  },
   {
     id: "general",
     icon: Settings2,

@@ -8,7 +8,6 @@ use napi::bindgen_prelude::*;
 use regex::Regex;
 use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use super::super::service::McpService;
@@ -339,17 +338,11 @@ impl GrepService {
 // ---------------------------------------------------------------------------
 
 async fn is_ripgrep_available() -> bool {
-    let mut cmd = Command::new("rg");
+    let mut cmd = crate::utils::process::cmd_async("rg");
     cmd.arg("--version");
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
 
     cmd.spawn()
         .and_then(|mut child| {
@@ -367,7 +360,7 @@ async fn run_ripgrep(
     case_sensitive: bool,
     _max_results: usize,
 ) -> napi::Result<String> {
-    let mut cmd = Command::new("rg");
+    let mut cmd = crate::utils::process::cmd_async("rg");
     cmd.arg("--line-number");
     cmd.arg("--no-heading");
     cmd.arg("--color").arg("never");
@@ -393,12 +386,6 @@ async fn run_ripgrep(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
 
     let mut child = cmd.spawn().map_err(|e| {
         Error::new(

@@ -307,8 +307,13 @@ pub fn store_chat_exchange(
                 // persisted below.
                 if !input.resume_after_compaction {
                     for (index, message) in input.request_messages.iter().enumerate() {
+                        // 所有 user 消息都绑定本次请求的 checkpoint。工具迭代
+                        // 中途刷新的待发消息以 [tool, user] 结构进入请求，
+                        // 若只绑定首条 user，该消息的 checkpoint 无法落库，
+                        // 重启后回滚到它会丢失文件变更（与 Pending 消息回滚
+                        // 错乱同源）。
                         let checkpoint_id =
-                            if index == 0 && normalize_role(&message.role) == "user" {
+                            if normalize_role(&message.role) == "user" {
                                 input.checkpoint_id
                             } else {
                                 ""

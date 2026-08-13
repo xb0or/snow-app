@@ -1,0 +1,560 @@
+.data-management-page {
+  gap: 0;
+  padding-bottom: 24px;
+}
+
+.data-management-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.data-management-title-row svg {
+  color: var(--accent-color);
+}
+
+.data-management-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.data-management-device-pill,
+.data-management-phase-badge,
+.data-management-inline-status,
+.data-management-scope-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.data-management-device-pill {
+  padding: 6px 9px;
+  color: var(--text-primary);
+}
+
+.data-management-device-pill svg {
+  color: var(--accent-color);
+}
+
+.data-management-summary-meta,
+.data-management-card-meta {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.data-management-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 3px;
+  margin-bottom: 16px;
+  padding: 3px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+}
+
+.data-management-tab {
+  display: inline-flex;
+  flex: 1 1 0;
+  min-height: 35px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.data-management-tab:hover {
+  color: var(--text-primary);
+}
+
+.data-management-tab.active {
+  border-color: var(--border-light);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.data-management-tab:focus-visible,
+.data-management-primary-button:focus-visible,
+.data-management-secondary-button:focus-visible {
+  outline: 2px solid var(--focus-ring-color, var(--accent-color));
+  outline-offset: 1px;
+}
+
+.data-management-tab-content {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.data-management-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 20%, var(--border-light));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-color) 5%, var(--bg-secondary));
+}
+
+.data-management-hero-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-color) 13%, var(--bg-secondary));
+  color: var(--accent-color);
+}
+
+.data-management-hero > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.data-management-hero strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.data-management-hero p,
+.data-management-card p {
+  margin: 5px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.data-management-phase-badge {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-color: color-mix(in srgb, var(--accent-color) 28%, var(--border-light));
+  color: var(--accent-color);
+}
+
+.data-management-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.data-management-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.data-management-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.data-management-card-heading > svg {
+  flex: 0 0 auto;
+  color: var(--accent-color);
+}
+
+.data-management-card-heading strong {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.data-management-card-heading .data-management-inline-status {
+  margin-left: auto;
+}
+
+.data-management-inline-status,
+.data-management-scope-badge {
+  padding: 5px 7px;
+  border-color: var(--border-subtle, var(--border-light));
+  background: var(--bg-tertiary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.data-management-secondary-button,
+.data-management-primary-button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 13px;
+  padding: 0 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.data-management-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.data-management-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.data-management-form-grid select,
+.data-management-form-grid input[type="password"] {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.data-management-backup-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.data-management-backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+
+.data-management-backup-row > div:first-child {
+  min-width: 0;
+}
+
+.data-management-backup-row strong,
+.data-management-backup-row span {
+  display: block;
+}
+
+.data-management-backup-row strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.data-management-backup-row span {
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.data-management-backup-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.data-management-backup-actions .data-management-secondary-button {
+  margin-top: 0;
+}
+
+.data-management-primary-button {
+  margin-top: 0;
+  border-color: var(--accent-color);
+  background: var(--accent-color);
+  color: var(--on-solid, #fff);
+  cursor: pointer;
+}
+
+.data-management-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.data-management-security-card {
+  background: color-mix(in srgb, var(--accent-color) 3%, var(--bg-secondary));
+}
+
+.data-management-rule-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.data-management-rule-list > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.data-management-rule-list svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--accent-color);
+}
+
+.data-management-section-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.data-management-section-chip {
+  padding: 6px 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.data-management-database-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.data-management-database-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle, var(--border-light));
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.data-management-database-row > svg {
+  flex: 0 0 auto;
+  color: var(--accent-color);
+}
+
+.data-management-database-row > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.data-management-database-row strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.data-management-database-row span {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.data-management-muted-note {
+  display: block;
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.data-management-form-row,
+.data-management-form-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.data-management-form-row {
+  grid-template-columns: minmax(110px, 0.3fr) minmax(0, 1fr);
+  align-items: center;
+}
+
+.data-management-form-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.data-management-form-row label,
+.data-management-form-grid label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.data-management-form-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.data-management-form-row input,
+.data-management-form-grid input {
+  min-width: 0;
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.data-management-form-row input:focus,
+.data-management-form-grid input:focus {
+  border-color: var(--accent-color);
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+  outline-offset: 0;
+}
+
+.data-management-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 13px;
+}
+
+.data-management-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.data-management-status-card > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.data-management-status-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.data-management-status-card strong {
+  font-size: 12px;
+}
+
+.data-management-status-card span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.data-management-status-card .data-management-error-inline {
+  color: var(--color-error, #d95c5c);
+  overflow-wrap: anywhere;
+}
+
+.data-management-status-card.is-ready > svg,
+.data-management-status-card.is-ready strong {
+  color: var(--accent-green-text, var(--accent-color));
+}
+
+.data-management-status-card.is-warning > svg,
+.data-management-status-card.is-warning strong {
+  color: var(--accent-amber-text, var(--accent-color));
+}
+
+.data-management-progress,
+.data-management-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.data-management-progress {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.data-management-progress.failed,
+.data-management-error {
+  color: var(--accent-red-text, #dc2626);
+  background: var(--accent-red-bg, color-mix(in srgb, #dc2626 8%, transparent));
+}
+
+.data-management-progress span:last-child {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-management-error {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .data-management-card-grid,
+  .data-management-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .data-management-hero {
+    flex-wrap: wrap;
+  }
+
+  .data-management-phase-badge {
+    margin-left: 45px;
+  }
+}
+
+@media (max-width: 520px) {
+  .data-management-tabs {
+    overflow-x: auto;
+  }
+
+  .data-management-tab {
+    flex: 0 0 auto;
+    padding: 0 9px;
+  }
+
+  .data-management-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .data-management-form-footer,
+  .data-management-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .data-management-primary-button {
+    width: 100%;
+  }
+}

@@ -1,5 +1,26 @@
 # Release Notes
 
+## v0.1.27
+
+## New Features
+
+- **Project Tool Authorization Management**: A new project-level panel lets you view and delete authorized tools, with a new `/permissions` command (disabled in YOLO mode).
+- **Git Commit & Push Mode**: The commit button gains a dropdown to switch between "Commit only" and "Commit and push" — the choice persists across restarts, and push failures are handled with clear errors.
+- **Git Repository Settings**: A dedicated Git settings panel configures scan depth (default 1, mirroring VSCode), ignored folders, change watcher debounce, SSH poll interval, status change limit, and auto-refresh; oversized repositories stay responsive as local status is truncated at the limit with a warning in the Git panel.
+- **Image Library Storage Location**: Image library directory switching/reset/migration moves into the general settings storage section (next to checkpoint/upload directories, with occupied size shown); migration supports cancellation and automatic rollback.
+- **Standalone Window Tab Migration**: Detached browser windows carry a snapshot of all instance tabs and can be migrated back to the main window's right panel via a "Restore as Tab" menu item, preserving instance IDs.
+
+## Improvements
+
+- **Checkpoint Parallelism**: Working-directory locks are now `RwLock` with manifest-level granularity, so multiple sessions of the same project can process different checkpoints in parallel; object retention follows BLAKE3 content-addressing dedup, making checkpoint deletion constant-time without global scans.
+- **Goal Mode**: Adds an "Unlimited" token budget option.
+- Message checkpoints now carry a `checkpoint_ids` field computed uniformly by the native layer.
+
+## Bug Fixes
+
+- Element selection mode is no longer canceled during iframe navigation — it now triggers only on main-frame navigation.
+- Fixed the version number typo in RELEASE_NOTES.
+
 ## v0.1.26
 
 ## New Features

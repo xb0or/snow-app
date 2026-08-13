@@ -241,6 +241,52 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
       let summaryTriggered = false;
 
       const isRunCancelled = createIsRunCancelled(ctx, currentRunId);
+
+      // 为 run 中途刷新的待发消息创建专属 checkpoint 并登记到会话
+      // checkpointIds，保证"回滚到该消息"能恢复到它处理前的文件状态。
+      // createCheckpoint 是异步的：await 期间本 run 可能已被取消或被更新
+      // 的 run 取代（停止按钮、PendingMessages 强制发送会先 handleAbort
+      // 再立即启动新 run），已被取代的 checkpoint 直接删除、不登记。
+      // SSH 目录或创建失败时返回 undefined（调用方退回无 checkpoint 的
+      // 旧行为，消息照常刷新）。
+      const createFlushCheckpoint = async (
+        flushKey: string,
+        flushDirPath: string | undefined
+      ): Promise<string | undefined> => {
+        if (!flushDirPath || flushDirPath.startsWith("ssh://")) {
+          return undefined;
+        }
+        try {
+          const flushCheckpointId = await window.snow.createCheckpoint(
+            flushDirPath
+          );
+          if (isRunCancelled(flushKey)) {
+            if (flushCheckpointId) {
+              deleteCheckpoints([flushCheckpointId]);
+            }
+            return undefined;
+          }
+          const flushRef = ctx.sessionsRefData.current.get(flushKey);
+          if (flushRef) {
+            flushRef.checkpointIds = [
+              ...flushRef.checkpointIds,
+              flushCheckpointId,
+            ];
+          }
+          if (!ctx.sessionsRef.current[flushKey]?.baselineCheckpointId) {
+            ctx.updateSessionField(
+              flushKey,
+              "baselineCheckpointId",
+              flushCheckpointId
+            );
+          }
+          return flushCheckpointId;
+        } catch {
+          // Best effort — continue without a checkpoint
+          return undefined;
+        }
+      };
+
       const awaitHookDecision = createAwaitHookDecision(ctx);
 
       const executeSubAgentActivation = createSubAgentActivation({
@@ -754,6 +800,28 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
           const pendingQueueNoTools =
             ctx.pendingQueueRef.current.get(effectiveKey) ?? [];
           if (pendingQueueNoTools.length > 0) {
+            // 为待发消息创建专属 checkpoint：回滚到这条消息时能恢复到它
+            // 处理前的文件状态（此前刷新路径不建 checkpoint，回滚这类
+            // 消息永远显示"无文件变更"，且后续消息的变更还会错记到更早
+            // 的 checkpoint 上）。创建期间 run 被中止/顶替时 checkpoint
+            // 已由 createFlushCheckpoint 删除，此处直接放弃刷新，队列
+            // 保持原样交给后续 run 处理，避免消息悬空。
+            const flushDirPath =
+              directoryIdToPath(sessionDirId) ?? ctx.directoryPath;
+            const flushCheckpointId = await createFlushCheckpoint(
+              effectiveKey,
+              flushDirPath
+            );
+            if (isRunCancelled(effectiveKey)) {
+              return;
+            }
+            if (pendingQueueNoTools.length === 0) {
+              // 创建期间用户撤回了全部待发消息：不刷新，丢弃 checkpoint。
+              if (flushCheckpointId) {
+                deleteCheckpoints([flushCheckpointId]);
+              }
+              return;
+            }
             ctx.pendingQueueRef.current.delete(effectiveKey);
             const pendingText = pendingQueueNoTools
               .map((item) => item.text)
@@ -766,6 +834,7 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
               content: pendingText,
               timestamp: formatMessageTime(),
               status: "sent",
+              checkpointId: flushCheckpointId,
             };
             const nextAssistantId = createMessageId("assistant");
             const nextPendingAssistant: ChatConversationMessage = {
@@ -784,7 +853,8 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
             await runAgentLoop(
               nextAssistantId,
               [{ role: "user", content: pendingText }],
-              response.conversationId
+              response.conversationId,
+              flushCheckpointId
             );
           }
           return;
@@ -930,7 +1000,27 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
           content: string;
           toolResultsJson?: string;
         }[] = [{ role: "tool", content: toolResultContent, toolResultsJson }];
+        let pendingFlushCheckpointId: string | undefined;
         if (pendingQueueForTools.length > 0) {
+          // 与无工具刷新分支一致：先为待发消息建立专属 checkpoint，再
+          // 消费队列。否则回滚到这条消息永远没有文件变更，且后续消息
+          // 的变更会错记到更早的 checkpoint 上。
+          const flushDirPath =
+            directoryIdToPath(sessionDirId) ?? ctx.directoryPath;
+          pendingFlushCheckpointId = await createFlushCheckpoint(
+            effectiveKey,
+            flushDirPath
+          );
+          if (isRunCancelled(effectiveKey)) {
+            return;
+          }
+          if (pendingQueueForTools.length === 0) {
+            // 创建期间用户撤回了全部待发消息：不刷新，丢弃 checkpoint。
+            if (pendingFlushCheckpointId) {
+              deleteCheckpoints([pendingFlushCheckpointId]);
+            }
+            return;
+          }
           ctx.pendingQueueRef.current.delete(effectiveKey);
           const pendingText = pendingQueueForTools
             .map((item) => item.text)
@@ -942,6 +1032,7 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
             content: pendingText,
             timestamp: formatMessageTime(),
             status: "sent",
+            checkpointId: pendingFlushCheckpointId,
           };
           ctx.updateSessionMessages(effectiveKey, (currentMessages) => [
             ...currentMessages,
@@ -967,7 +1058,8 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
         await runAgentLoop(
           newAssistantMessageId,
           nextMessages,
-          response.conversationId
+          response.conversationId,
+          pendingFlushCheckpointId
         );
       };
 
@@ -1032,47 +1124,27 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
         let checkpointId: string | undefined;
         // checkpoint 绑定会话自己的目录(而非运行时全局目录),保证
         // manifest.work_dir 与工具执行的 cwd 始终一致。
-        const sessionDirPath = directoryIdToPath(sessionDirId) ?? ctx.directoryPath;
-        if (sessionDirPath && !sessionDirPath.startsWith("ssh://")) {
-          try {
-            // createCheckpoint 是异步的：await 期间本 run 可能已被取消或被
-            // 更新的 run 取代（停止按钮、PendingMessages 强制发送会先
-            // handleAbort 再立即启动新 run）。两个 run 的 checkpoint 若按
-            // 完成顺序 push 进 checkpointIds，顺序会与消息顺序错位，导致
-            // 回滚时按 checkpointId 定位的删除/恢复范围错误。因此创建完成
-            // 后必须校验 runId：已被取代的 checkpoint 直接删除、不绑定。
-            // 被取代的 run 从未开始执行工具（checkpoint 是工具执行的前置
-            // 步骤），其文件状态已由后一个 run 的 checkpoint 覆盖捕获，
-            // 删除是安全的。
-            checkpointId = await window.snow.createCheckpoint(
-              sessionDirPath
-            );
-            if (isRunCancelled(sessionKey)) {
-              if (checkpointId) {
-                deleteCheckpoints([checkpointId]);
-              }
-              checkpointId = undefined;
-              return;
-            }
-            const ref = ctx.sessionsRefData.current.get(sessionKey);
-            if (ref) {
-              ref.checkpointIds = [...ref.checkpointIds, checkpointId];
-            }
-            if (!ctx.sessionsRef.current[sessionKey]?.baselineCheckpointId) {
-              ctx.updateSessionField(
-                sessionKey,
-                "baselineCheckpointId",
-                checkpointId
-              );
-            }
-            ctx.updateSessionMessages(sessionKey, (currentMessages) =>
-              currentMessages.map((m) =>
-                m.id === userMessage.id ? { ...m, checkpointId } : m
-              )
-            );
-          } catch {
-            // Best effort — continue without a checkpoint
-          }
+        const sessionDirPath =
+          directoryIdToPath(sessionDirId) ?? ctx.directoryPath;
+        // createCheckpoint 是异步的：await 期间本 run 可能已被取消或被
+        // 更新的 run 取代（停止按钮、PendingMessages 强制发送会先
+        // handleAbort 再立即启动新 run）。两个 run 的 checkpoint 若按
+        // 完成顺序 push 进 checkpointIds，顺序会与消息顺序错位，导致
+        // 回滚时按 checkpointId 定位的删除/恢复范围错误。因此创建完成
+        // 后必须校验 runId：已被取代的 checkpoint 直接删除、不绑定。
+        // 被取代的 run 从未开始执行工具（checkpoint 是工具执行的前置
+        // 步骤），其文件状态已由后一个 run 的 checkpoint 覆盖捕获，
+        // 删除是安全的。
+        checkpointId = await createFlushCheckpoint(sessionKey, sessionDirPath);
+        if (isRunCancelled(sessionKey)) {
+          return;
+        }
+        if (checkpointId) {
+          ctx.updateSessionMessages(sessionKey, (currentMessages) =>
+            currentMessages.map((m) =>
+              m.id === userMessage.id ? { ...m, checkpointId } : m
+            )
+          );
         }
 
         // Execute onUserMessage hooks before sending the message to the AI.

@@ -419,9 +419,10 @@ async fn run_chat_round(
         "content": content_chunks.concat(),
         "tool_calls": tool_calls_by_index.into_values().collect::<Vec<_>>(),
     });
-    if !reasoning_chunks.is_empty() {
-        message["reasoning_content"] = json!(reasoning_chunks.concat());
-    }
+    // 与主流程一致：DeepSeek V4 思考模式下，带 tool_calls 的 assistant
+    // 消息必须回传 reasoning_content（空字符串也被接受），否则后续
+    // 工具轮次请求会收到 400 "reasoning_content must be passed back"。
+    message["reasoning_content"] = json!(reasoning_chunks.concat());
 
     let mut tool_calls: Vec<AgentToolCall> = Vec::new();
     if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
@@ -463,14 +464,14 @@ async fn run_chat_round(
         "tool_calls": message.get("tool_calls").cloned().unwrap_or(Value::Null),
     });
     // 与主流程一致：回传 reasoning_content，保持 DeepSeek 等思考模型的
-    // 推理连续性。
-    if let Some(reasoning) = message
-        .get("reasoning_content")
-        .and_then(Value::as_str)
-        .filter(|text| !text.is_empty())
-    {
-        assistant_message["reasoning_content"] = json!(reasoning);
-    }
+    // 推理连续性。DeepSeek V4 思考模式要求带 tool_calls 的 assistant
+    // 消息必须回传该字段（空字符串也被接受），缺失会导致 400。
+    assistant_message["reasoning_content"] = json!(
+        message
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    );
     let mut append = vec![assistant_message];
     for call in &tool_calls {
         let output = execute_agent_tool(

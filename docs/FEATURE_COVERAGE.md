@@ -1,14 +1,14 @@
 # 功能文档覆盖审计 / Feature Documentation Coverage Audit
 
-> **审计日期 / Audit date:** 2026-08-08
+> **审计日期 / Audit date:** 2026-08-13
 > **审计范围 / Audited scope:** `src/`, `native/src/`, `resources/`, `scripts/`, `docs/`
 > **权威来源 / Sources of truth:** 可达的产品入口与设置页、preload/IPC 合约、Rust 导出与 MCP 注册表、存储服务，以及随产品发布的双语文档。
 
 ## 1. 覆盖边界 / Coverage boundary
 
-**中文。** 本矩阵声明的是**产品功能级**文档覆盖：用户能发现和操作的能力、21 个设置页、固定或按条件暴露的内置工具域，以及平台与基础设施均必须有源码锚点和中英文文档落点。它不声称逐函数、逐参数或逐行解释实现；内部辅助函数、纯样式细节和生成产物只在影响用户行为、兼容性、安全边界或运维方式时单列。表中的源码路径是审计入口，不是唯一实现文件。
+**中文。** 本矩阵声明的是**产品功能级**文档覆盖：用户能发现和操作的能力、22 个设置页、固定或按条件暴露的内置工具域，以及平台与基础设施均必须有源码锚点和中英文文档落点。它不声称逐函数、逐参数或逐行解释实现；内部辅助函数、纯样式细节和生成产物只在影响用户行为、兼容性、安全边界或运维方式时单列。表中的源码路径是审计入口，不是唯一实现文件。
 
-**English.** This matrix declares **product-capability-level** documentation coverage. Every discoverable user capability, all 21 settings pages, every fixed or conditionally exposed built-in tool domain, and platform/infrastructure concerns must have source anchors plus Chinese and English documentation destinations. It does not claim function-by-function, parameter-by-parameter, or line-by-line explanation. Internal helpers, styling details, and generated artifacts are listed separately only when they affect user behavior, compatibility, security boundaries, or operations. Source paths are audit entry points, not an exhaustive implementation file list.
+**English.** This matrix declares **product-capability-level** documentation coverage. Every discoverable user capability, all 22 settings pages, every fixed or conditionally exposed built-in tool domain, and platform/infrastructure concerns must have source anchors plus Chinese and English documentation destinations. It does not claim function-by-function, parameter-by-parameter, or line-by-line explanation. Internal helpers, styling details, and generated artifacts are listed separately only when they affect user behavior, compatibility, security boundaries, or operations. Source paths are audit entry points, not an exhaustive implementation file list.
 
 ### 覆盖状态 / Coverage status
 
@@ -25,6 +25,7 @@
 | 功能 / Capability | 主要源码锚点 / Primary source anchors | 中文文档 / Chinese docs | English docs | 状态 |
 | --- | --- | --- | --- | --- |
 | 安装、首次启动与 API 初始配置 / Install, first launch, initial API setup | `src/main/app/bootstrap.ts`; `src/renderer/App.tsx` | [快速开始](zh-CN/1-快速开始.md) | [Getting started](en/1-getting-started.md) | C |
+| 数据管理：配置包、SQLite 快照、重启恢复与 WebDAV 配置/镜像同步 / Data management: configuration packages, SQLite snapshots, restart restore, and WebDAV config/mirror sync | `src/renderer/components/sidebar/settingsItems.ts`; `src/renderer/components/sidebar/dataManagement/`; `src/main/dataManagement/`; `native/src/storage/services/data_management.rs` | [数据管理、备份与 WebDAV 同步](zh-CN/2-使用指南/22-数据管理备份与WebDAV同步.md) | [Data management, backup, and WebDAV sync](en/2-guides/22-data-management-backup-and-webdav-sync.md) | C |
 | 本地项目创建，以及工作区添加、激活、排序、重命名、移除与资源管理器入口 / Local project creation plus workspace add, activate, reorder, rename, remove, and explorer entry | `src/renderer/components/sidebar/mainSidebar/ProjectsSection.tsx`; `src/renderer/components/sidebar/mainSidebar/WorkspaceDirectoryMenu.tsx`; `src/preload/modules/workspaceApi.ts`; `src/main/ipc/handlers/workspaceHandlers.ts` | [聊天与 AI 助手](zh-CN/2-使用指南/10-使用聊天与AI助手.md) | [Chat and AI assistant](en/2-guides/10-using-chat-and-ai.md) | A |
 | 已安装 IDE 探测与在 IDE 中打开本地工作区 / Installed-IDE detection and opening a local workspace in an IDE | `src/renderer/components/sidebar/mainSidebar/WorkspaceDirectoryMenu.tsx`; `src/preload/modules/ideApi.ts`; `src/main/ipc/handlers/ideHandlers.ts`; `native/src/exports/ide.rs` | [Git 与代码浏览](zh-CN/2-使用指南/12-Git面板与代码浏览.md) | [Git and code browsing](en/2-guides/12-git-and-code-browsing.md) | A |
 | SSH 工作区、凭据、远程文件与远程命令 / SSH workspaces, credentials, remote files and commands | `src/main/ssh/`; `src/renderer/components/sidebar/mainSidebar/SshConnectWizard.tsx` | [终端与 SSH](zh-CN/2-使用指南/11-终端与SSH远程管理.md) | [Terminal and SSH](en/2-guides/11-terminal-and-ssh.md) | C |
@@ -65,9 +66,9 @@
 | 面板折叠/缩放/全屏、系统通知、托盘、窗口状态与关闭确认 / Panel collapse/resize/fullscreen, notifications, tray, window state, and close confirmation | `src/renderer/App.tsx`; `src/renderer/components/NotificationNavigationBridge.tsx`; `src/main/notification/`; `src/main/app/mainWindow.ts`; `src/main/app/tray.ts`; `src/main/app/windowState.ts` | [聊天与 AI 助手](zh-CN/2-使用指南/10-使用聊天与AI助手.md) | [Chat and AI assistant](en/2-guides/10-using-chat-and-ai.md) | C |
 | 应用更新、下载与安装 / App update, download, installation | `src/main/updater/`; `native/src/exports/updater.rs` | [应用更新](zh-CN/2-使用指南/18-应用更新.md) | [App updates](en/2-guides/18-app-updates.md) | C |
 
-## 3. 21 个设置页 / All 21 settings pages
+## 3. 22 个设置页 / All 22 settings pages
 
-此清单以 `src/renderer/components/sidebar/settingsItems.ts` 的 `SETTINGS_ITEMS` 为准；`MainContentView` 由 `src/renderer/components/mainContent/types.ts` 交叉核验。
+此清单以 `src/renderer/components/sidebar/settingsItems.ts` 的 `SETTINGS_ITEMS` 为准；`MainContentView` 由 `src/renderer/components/mainContent/types.ts` 交叉核验。数据管理页新增为第 22 个设置页。
 
 | # | 设置页 / Settings page | UI 源码 / UI source | 中文文档 | English docs | 状态 |
 | ---: | --- | --- | --- | --- | --- |
@@ -92,6 +93,7 @@
 | 19 | 隐私设置 / Privacy settings | `src/renderer/components/sidebar/PrivacySettingsPanel.tsx` | [安全、隐私与工具授权](zh-CN/2-使用指南/16-安全隐私与工具授权.md) | [Security, privacy, and tool authorization](en/2-guides/16-security-privacy-and-tool-authorization.md) | C |
 | 20 | 用量统计 / Usage statistics | `src/renderer/components/sidebar/usageSettings/UsageSettingsPanel.tsx` | [用量统计与系统日志](zh-CN/2-使用指南/20-用量统计与系统日志.md) | [Usage statistics and system logs](en/2-guides/20-usage-statistics-and-system-logs.md) | C |
 | 21 | 系统日志 / System logs | `src/renderer/components/sidebar/systemLogs/SystemLogsPanel.tsx` | [用量统计与系统日志](zh-CN/2-使用指南/20-用量统计与系统日志.md) | [Usage statistics and system logs](en/2-guides/20-usage-statistics-and-system-logs.md) | C |
+| 22 | 数据管理 / Data management | `src/renderer/components/sidebar/dataManagement/DataManagementPanel.tsx`; `src/main/dataManagement/` | [数据管理、备份与 WebDAV 同步](zh-CN/2-使用指南/22-数据管理备份与WebDAV同步.md) | [Data management, backup, and WebDAV sync](en/2-guides/22-data-management-backup-and-webdav-sync.md) | C |
 
 ## 4. 内置工具域 / Built-in tool domains
 

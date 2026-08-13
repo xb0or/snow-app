@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{
     Arc, Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
@@ -506,7 +504,7 @@ fn write_manifest(checkpoint_id: &str, manifest: &CheckpointManifest) -> Result<
 }
 
 fn run_git(work_dir: &Path, args: &[&str]) -> Result<Output> {
-    let mut command = Command::new("git");
+    let mut command = crate::utils::process::cmd("git");
     // `safe.directory=*` bypasses Git's dubious-ownership check
     // (CVE-2022-24765), so git works inside WSL (`\\wsl$\...`) and other
     // UNC/network paths where the repo is owned by a different user.
@@ -514,12 +512,6 @@ fn run_git(work_dir: &Path, args: &[&str]) -> Result<Output> {
         .args(["-c", "core.quotepath=false", "-c", "safe.directory=*"])
         .args(args)
         .current_dir(work_dir);
-
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
 
     command
         .output()
@@ -1083,11 +1075,8 @@ fn tracked_file_change(
 }
 
 /// Content-level change confirmation for a tracked file that was clean at
-/// capture time (no snapshot, no pre-command metadata to filter on): compare
-/// the current file against the git baseline object directly. Used by the
-/// git-driven path, where `git diff` already narrowed candidates to files
-/// whose content differs from the baseline — so a plain `touch` never reaches
-/// this function at all.
+/// capture time (no snapshot): compare the current file against the git
+/// baseline object. Used by the legacy fallback path (`tracked_file_change`).
 fn tracked_file_content_change(
     manifest: &CheckpointManifest,
     relative_path: &str,
@@ -1385,14 +1374,12 @@ pub fn record_checkpoint_worktree_after(capture: CheckpointWorktreeCapture) -> R
                 let before_state = capture.before_states.get(relative_path);
 
                 // 变更检测 + 原始状态物化:
-                // - git 驱动路径:有快照的文件(脏 tracked / 未跟踪)直接做
-                //   快照内容级对比,original 为 Object(恢复命令前内容,保留
-                //   会话外编辑与先前命令的修改);无快照的 diff 候选(干净
-                //   tracked 在命令期间变更/删除/提交)走基线内容确认,original
-                //   为 Git(固定 SHA,回滚安全);其余候选为命令新增的未跟踪
-                //   文件 → Missing。
-                // - 回退路径:git 跟踪文件元数据快速过滤 → git 内容级确认;
-                //   未跟踪文件与 pending 快照内容级对比;新增文件 → Missing。
+                // - git 驱动路径:有快照的文件对比快照(original 为 Object);
+                //   无快照的 clean tracked 文件仅删除时记录(original 为 Git),
+                //   内容修改不记录(无法区分命令副作用与用户手动编辑);
+                //   其余为命令新增的未跟踪文件 → Missing。
+                // - 回退路径:tracked 元数据过滤 → 内容确认;未跟踪文件对比
+                //   快照;新增文件 → Missing。
                 let change = match before_state {
                     // 快照被跳过：无法恢复命令前内容，不记录变更
                     Some(state) if state.skipped => None,
@@ -1414,7 +1401,11 @@ pub fn record_checkpoint_worktree_after(capture: CheckpointWorktreeCapture) -> R
                         }
                     }
                     None if diff_now.contains(relative_path) => {
-                        tracked_file_content_change(&manifest, relative_path, &absolute)?
+                        // 无快照的 clean tracked:仅删除时记录,内容修改不记录
+                        match fs::metadata(&absolute) {
+                            Err(_) => Some(OriginalState::Git),
+                            Ok(_) => None,
+                        }
                     }
                     None => absolute.is_file().then_some(OriginalState::Missing),
                 };
