@@ -247,13 +247,13 @@ export const useAgentLoop = (params: UseAgentLoopParams) => {
       // createCheckpoint 是异步的：await 期间本 run 可能已被取消或被更新
       // 的 run 取代（停止按钮、PendingMessages 强制发送会先 handleAbort
       // 再立即启动新 run），已被取代的 checkpoint 直接删除、不登记。
-      // SSH 目录或创建失败时返回 undefined（调用方退回无 checkpoint 的
-      // 旧行为，消息照常刷新）。
+      // SSH 目录同样创建（后端经 SFTP 捕获）；创建失败时返回 undefined
+      // （调用方退回无 checkpoint 的旧行为，消息照常刷新）。
       const createFlushCheckpoint = async (
         flushKey: string,
         flushDirPath: string | undefined
       ): Promise<string | undefined> => {
-        if (!flushDirPath || flushDirPath.startsWith("ssh://")) {
+        if (!flushDirPath) {
           return undefined;
         }
         try {

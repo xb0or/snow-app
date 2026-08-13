@@ -178,7 +178,12 @@ export function KeyboardShortcutsSettingsPanel({
 
         <div className="shortcut-list">
           {SHORTCUT_ACTIONS.map((action) => {
-            const config: KeyboardShortcutConfig = settings[action];
+            // 防御：native 版本错配导致个别字段缺失时回退默认，避免整页崩溃
+            const config: KeyboardShortcutConfig = settings[action] ?? {
+              key: DEFAULT_KEYS[action],
+              enabled: true,
+              foregroundOnly: action !== "toggleWindow",
+            };
             const meta = SHORTCUT_META[action];
             const isRecording = recordingAction === action;
             const conflicts = findConflicts(settings, config.key, action);
@@ -313,7 +318,11 @@ export function KeyboardShortcutsSettingsPanel({
             type="button"
           >
             <RotateCcw size={15} strokeWidth={1.9} />
-            <span>{t("settings.shortcutReset", { defaultValue: "Reset to default" })}</span>
+            <span>
+              {t("settings.shortcutReset", {
+                defaultValue: "Reset to default",
+              })}
+            </span>
           </button>
         </div>
       </div>

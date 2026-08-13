@@ -44,13 +44,16 @@ const BROWSER_COMMAND_RESPONSE_CHANNEL = "browser:command-response";
 const BROWSER_OPEN_TAB_CHANNEL = "browser:open-tab";
 // 独立浏览器窗口「还原为标签页」：窗口 → 主进程 → 主窗口（broadcast）。
 const BROWSER_RESTORE_TO_MAIN_CHANNEL = "browser:restore-to-main";
-const BROWSER_RESTORE_TO_MAIN_BROADCAST_CHANNEL = "browser:restore-to-main-broadcast";
+const BROWSER_RESTORE_TO_MAIN_BROADCAST_CHANNEL =
+  "browser:restore-to-main-broadcast";
 // 独立浏览器窗口确认元素选择后转发到主窗口聊天输入框。
 const ELEMENT_TAG_FORWARD_CHANNEL = "element-tag:forward";
 const ELEMENT_TAG_INSERT_CHANNEL = "element-tag:insert";
 // 独立浏览器窗口点击「浏览器设置」后经主进程转发到主窗口（Sidebar 打开设置）。
-const APP_CONTROL_OPEN_SETTINGS_FORWARD_CHANNEL = "app-control:open-settings-forward";
-const APP_CONTROL_OPEN_SETTINGS_BROADCAST_CHANNEL = "app-control:open-settings-broadcast";
+const APP_CONTROL_OPEN_SETTINGS_FORWARD_CHANNEL =
+  "app-control:open-settings-forward";
+const APP_CONTROL_OPEN_SETTINGS_BROADCAST_CHANNEL =
+  "app-control:open-settings-broadcast";
 const TERMINAL_COMMAND_CHANNEL = "terminal:command";
 const TERMINAL_COMMAND_RESPONSE_CHANNEL = "terminal:command-response";
 const USER_QUESTION_CHANNEL = "user-question:request";
@@ -128,7 +131,10 @@ type BrowserOpenTabSubscriber = (event: BrowserOpenTabEvent) => void;
 
 const browserOpenTabSubscribers = new Set<BrowserOpenTabSubscriber>();
 
-const deliverBrowserOpenTab = (subscriber: BrowserOpenTabSubscriber, event: BrowserOpenTabEvent): void => {
+const deliverBrowserOpenTab = (
+  subscriber: BrowserOpenTabSubscriber,
+  event: BrowserOpenTabEvent
+): void => {
   try {
     subscriber(event);
   } catch (error) {
@@ -175,7 +181,9 @@ const deliverBrowserRestore = (
   }
 };
 
-const isBrowserRestorePayload = (value: unknown): value is BrowserRestorePayload => {
+const isBrowserRestorePayload = (
+  value: unknown
+): value is BrowserRestorePayload => {
   if (!isRecord(value) || typeof value.instanceId !== "string") {
     return false;
   }
@@ -450,7 +458,12 @@ export const systemApi = {
     page: number,
     pageSize: number
   ): Promise<CodebaseIndexedFilePage> =>
-    ipcRenderer.invoke("codebase:list-indexed-files", projectId, page, pageSize),
+    ipcRenderer.invoke(
+      "codebase:list-indexed-files",
+      projectId,
+      page,
+      pageSize
+    ),
   getCodebaseSphereLayout: (
     projectId: string,
     limit: number
@@ -684,7 +697,9 @@ export const systemApi = {
    * 渲染端每个 BrowserPanelContent 实例在挂载时订阅，按 guestWebContentsId
    * 判断事件是否属于自己的某个 webview，是则在实例内部新建标签页。
    */
-  onBrowserOpenTab: (callback: (event: BrowserOpenTabEvent) => void): (() => void) => {
+  onBrowserOpenTab: (
+    callback: (event: BrowserOpenTabEvent) => void
+  ): (() => void) => {
     browserOpenTabSubscribers.add(callback);
     return () => {
       browserOpenTabSubscribers.delete(callback);
@@ -722,9 +737,7 @@ export const systemApi = {
    * 订阅主进程转发过来的「打开设置」请求（主窗口 Sidebar 使用）。
    * 返回取消订阅函数。
    */
-  onOpenSettingsRequest: (
-    callback: (view: string) => void
-  ): (() => void) => {
+  onOpenSettingsRequest: (callback: (view: string) => void): (() => void) => {
     openSettingsRequestSubscribers.add(callback);
     return () => {
       openSettingsRequestSubscribers.delete(callback);
@@ -795,12 +808,7 @@ export const systemApi = {
     url: string,
     tabs?: BrowserRestoreTab[]
   ): Promise<void> =>
-    ipcRenderer.invoke(
-      "browser:open-detached-window",
-      instanceId,
-      url,
-      tabs
-    ),
+    ipcRenderer.invoke("browser:open-detached-window", instanceId, url, tabs),
   /**
    * 独立浏览器窗口「还原为标签页」：把当前实例（含全部内部标签页）
    * 经主进程转发给主窗口，由 RightPanel 恢复为右侧面板浏览器 tab，
@@ -1124,6 +1132,8 @@ export const windowApi = {
     ipcRenderer.invoke("window:is-maximized"),
   clearWindowState: (): Promise<void> =>
     ipcRenderer.invoke("window:clear-state"),
+  /** 错误边界"重新加载"：由主进程强制刷新渲染进程（比 location.reload 可靠）。 */
+  reloadWindow: (): Promise<void> => ipcRenderer.invoke("window:reload"),
   startWindowDrag: (): Promise<void> => ipcRenderer.invoke("window:start-drag"),
   stopWindowDrag: (): Promise<void> => ipcRenderer.invoke("window:stop-drag"),
   writeImageToClipboard: (dataUrl: string): Promise<void> =>
@@ -1311,9 +1321,7 @@ export const windowApi = {
   }> => ipcRenderer.invoke("browser:trace", webContentsId, durationMs),
   browserNetworkRequest: (recordId: number): Promise<unknown | null> =>
     ipcRenderer.invoke("browser:network-request", recordId),
-  browserNetworkClear: (
-    webContentsId: number
-  ): Promise<{ cleared: number }> =>
+  browserNetworkClear: (webContentsId: number): Promise<{ cleared: number }> =>
     ipcRenderer.invoke("browser:network-clear", webContentsId),
   browserDialogs: (webContentsId: number): Promise<unknown[]> =>
     ipcRenderer.invoke("browser:dialogs-list", webContentsId),

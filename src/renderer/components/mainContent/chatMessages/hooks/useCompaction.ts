@@ -49,14 +49,15 @@ export const useCompaction = (ctx: ConversationContextValue) => {
       // the compaction boundary can restore files modified by the subsequent
       // agent loop. A compaction boundary is semantically a user message — its
       // checkpoint captures the working-directory state at the moment the
-      // handoff was generated. Skip checkpoint creation for SSH directories
-      // where local snapshots are not available.
+      // handoff was generated. SSH directories are supported too (the backend
+      // captures through the remote SFTP channel); creation failure falls back
+      // to a checkpoint-less compaction.
       let checkpointId: string | undefined;
       // checkpoint 绑定会话自己的目录,与工具执行的 cwd 保持一致。
       const sessionDirPath =
         directoryIdToPath(sessionRef?.directoryId ?? ctx.directoryId) ??
         ctx.directoryPath;
-      if (sessionDirPath && !sessionDirPath.startsWith("ssh://")) {
+      if (sessionDirPath) {
         try {
           checkpointId = await window.snow.createCheckpoint(sessionDirPath);
           if (sessionRef) {

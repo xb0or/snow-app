@@ -82,9 +82,7 @@ export const useConversationFileChanges = ({
     [messages]
   );
 
-  const canUseCheckpoint = Boolean(
-    baselineCheckpointId && workDir && !workDir.startsWith("ssh://")
-  );
+  const canUseCheckpoint = Boolean(baselineCheckpointId && workDir);
   const requestKey = JSON.stringify([
     baselineCheckpointId ?? "",
     workDir ?? "",

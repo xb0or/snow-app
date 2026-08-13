@@ -19,18 +19,18 @@ type ImportExportTabProps = {
   onImport: (request: DataManagementImportRequest) => Promise<DataManagementImportPreview | null>;
 };
 
-const SECTION_LABELS: Record<string, string> = {
-  "api-config": "API and model configuration",
-  "model-settings": "Model settings",
-  "system-settings": "System settings",
-  mcp: "MCP servers",
-  prompts: "Prompts and commands",
-  hooks: "Hooks",
-  "sub-agents": "Sub-agents",
-  "keyboard-shortcuts": "Keyboard shortcuts",
-  theme: "Theme",
-  skills: "Portable skills",
-  plugins: "Managed plugins",
+const SECTION_KEYS: Record<string, string> = {
+  "api-config": "settings.dataManagementSectionApiConfig",
+  "model-settings": "settings.dataManagementSectionModelSettings",
+  "system-settings": "settings.dataManagementSectionSystemSettings",
+  mcp: "settings.dataManagementSectionMcp",
+  prompts: "settings.dataManagementSectionPrompts",
+  hooks: "settings.dataManagementSectionHooks",
+  "sub-agents": "settings.dataManagementSectionSubAgents",
+  "keyboard-shortcuts": "settings.dataManagementSectionKeyboardShortcuts",
+  theme: "settings.dataManagementSectionTheme",
+  skills: "settings.dataManagementSectionSkills",
+  plugins: "settings.dataManagementSectionPlugins",
 };
 
 export function ImportExportTab({
@@ -48,7 +48,7 @@ export function ImportExportTab({
 
   const handleExport = async (): Promise<void> => {
     const password = includeSecrets
-      ? window.prompt("Set an encryption password for this export") ?? ""
+      ? window.prompt(t("settings.dataManagementExportPasswordPrompt", { defaultValue: "Set an encryption password for this export" })) ?? ""
       : undefined;
     if (includeSecrets && !password) return;
     setBusy(true);
@@ -58,7 +58,13 @@ export function ImportExportTab({
         includeSecrets,
         password,
       });
-      if (result) setMessage(`Exported ${result.rows} configuration rows`);
+      if (result)
+        setMessage(
+          t("settings.dataManagementExportedRows", {
+            values: { rows: result.rows },
+            defaultValue: "Exported {{rows}} configuration rows",
+          })
+        );
     } catch {
       // The shared panel displays the error from useDataManagement.
     } finally {
@@ -72,7 +78,7 @@ export function ImportExportTab({
       let nextPreview = await onPreviewImport();
       if (!nextPreview) return;
       const password = nextPreview.encrypted
-        ? window.prompt("Enter the package encryption password") ?? ""
+        ? window.prompt(t("settings.dataManagementImportPasswordPrompt", { defaultValue: "Enter the package encryption password" })) ?? ""
         : undefined;
       if (nextPreview.encrypted && !password) return;
       if (password) {
@@ -81,14 +87,31 @@ export function ImportExportTab({
         nextPreview = decryptedPreview;
       }
       setPreview(nextPreview);
-      const description = `${nextPreview.rows} rows, ${nextPreview.sections.length} sections`;
-      if (!window.confirm(`Import this configuration package (${description})?`)) return;
+      const description = t("settings.dataManagementImportDescription", {
+        values: { rows: nextPreview.rows, sections: nextPreview.sections.length },
+        defaultValue: "{{rows}} rows, {{sections}} sections",
+      });
+      if (
+        !window.confirm(
+          t("settings.dataManagementImportConfirm", {
+            values: { description },
+            defaultValue: "Import this configuration package ({{description}})?",
+          })
+        )
+      )
+        return;
       const result = await onImport({
         sections: [...DATA_SECTIONS],
         password,
         replaceSelected,
       });
-      if (result) setMessage(`Imported ${result.rows} configuration rows`);
+      if (result)
+        setMessage(
+          t("settings.dataManagementImportedRows", {
+            values: { rows: result.rows },
+            defaultValue: "Imported {{rows}} configuration rows",
+          })
+        );
     } catch {
       // The shared panel displays the error from useDataManagement.
     } finally {
@@ -134,13 +157,20 @@ export function ImportExportTab({
                 "The export flow will create a .snow-config package with a versioned manifest and per-file hashes.",
             })}
           </p>
-          <button className="data-management-secondary-button" disabled={busy} onClick={() => void handleExport()} type="button">
-            {includeSecrets ? "Export encrypted package" : "Export package"}
-          </button>
-          <label className="data-management-checkbox-row">
-            <input type="checkbox" checked={includeSecrets} onChange={(event) => setIncludeSecrets(event.target.checked)} />
-            <span>Include sensitive configuration (requires encryption)</span>
-          </label>
+          <div className="data-management-stack-actions">
+            <button className="data-management-primary-button" disabled={busy} onClick={() => void handleExport()} type="button">
+              {includeSecrets
+                ? t("settings.dataManagementExportEncryptedPackage", { defaultValue: "Export encrypted package" })
+                : t("settings.dataManagementExportPackage", { defaultValue: "Export package" })}
+            </button>
+            <div className="data-management-checkbox-row">
+              <label className="toggle-switch">
+                <input type="checkbox" hidden checked={includeSecrets} onChange={(event) => setIncludeSecrets(event.target.checked)} />
+                <span className="toggle-slider" />
+              </label>
+              <span>{t("settings.dataManagementIncludeSensitive", { defaultValue: "Include sensitive configuration (requires encryption)" })}</span>
+            </div>
+          </div>
         </section>
 
         <section className="data-management-card">
@@ -158,13 +188,18 @@ export function ImportExportTab({
                 "Before writing anything, the importer will validate hashes, reject unsafe paths and create a safety snapshot.",
             })}
           </p>
-          <button className="data-management-secondary-button" disabled={busy} onClick={() => void handleImport()} type="button">
-            Import and preview changes
-          </button>
-          <label className="data-management-checkbox-row">
-            <input type="checkbox" checked={replaceSelected} onChange={(event) => setReplaceSelected(event.target.checked)} />
-            <span>Replace selected sections</span>
-          </label>
+          <div className="data-management-stack-actions">
+            <button className="data-management-primary-button" disabled={busy} onClick={() => void handleImport()} type="button">
+              {t("settings.dataManagementImportAndPreview", { defaultValue: "Import and preview changes" })}
+            </button>
+            <div className="data-management-checkbox-row">
+              <label className="toggle-switch">
+                <input type="checkbox" hidden checked={replaceSelected} onChange={(event) => setReplaceSelected(event.target.checked)} />
+                <span className="toggle-slider" />
+              </label>
+              <span>{t("settings.dataManagementReplaceSelected", { defaultValue: "Replace selected sections" })}</span>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -174,11 +209,23 @@ export function ImportExportTab({
         <section className="data-management-card data-management-preview-card">
           <div className="data-management-card-heading">
             <ShieldCheck size={16} aria-hidden="true" />
-            <strong>Last import preview</strong>
+            <strong>{t("settings.dataManagementLastImportPreview", { defaultValue: "Last import preview" })}</strong>
           </div>
           <p>
-            {preview.rows} rows across {preview.sections.length} sections; estimated payload {preview.estimatedBytes.toLocaleString()} bytes.
-            {preview.deviceSpecificItems > 0 ? ` ${preview.deviceSpecificItems} device-specific values are redacted.` : ""}
+            {t("settings.dataManagementPreviewSummary", {
+              values: {
+                rows: preview.rows,
+                sections: preview.sections.length,
+                bytes: preview.estimatedBytes.toLocaleString(),
+              },
+              defaultValue: "{{rows}} rows across {{sections}} sections; estimated payload {{bytes}} bytes.",
+            })}
+            {preview.deviceSpecificItems > 0
+              ? t("settings.dataManagementPreviewRedacted", {
+                  values: { count: preview.deviceSpecificItems },
+                  defaultValue: " {{count}} device-specific values are redacted.",
+                })
+              : ""}
           </p>
         </section>
       )}
@@ -228,13 +275,18 @@ export function ImportExportTab({
             })}
           </strong>
           <span className="data-management-card-meta">
-            {state ? `device ${state.deviceId.slice(0, 8)}…` : "—"}
+            {state
+              ? t("settings.dataManagementDeviceShort", {
+                  values: { id: state.deviceId.slice(0, 8) },
+                  defaultValue: "device {{id}}",
+                })
+              : "—"}
           </span>
         </div>
         <div className="data-management-section-list">
           {DATA_SECTIONS.map((section) => (
             <span key={section} className="data-management-section-chip">
-              {SECTION_LABELS[section] ?? section}
+              {t(SECTION_KEYS[section] ?? section, { defaultValue: section })}
             </span>
           ))}
         </div>

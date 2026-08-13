@@ -57,8 +57,8 @@ export const isChunkLoadError = (error: unknown): boolean => {
     error instanceof Error
       ? error.message
       : typeof error === "string"
-        ? error
-        : "";
+      ? error
+      : "";
 
   return (
     message.includes("Failed to fetch dynamically imported module") ||
@@ -103,8 +103,7 @@ const ErrorFallback = ({ message }: ErrorFallbackProps): React.JSX.Element => {
         justifyContent: "center",
         background: "var(--bg-primary, #ffffff)",
         color: "var(--text-primary, #111827)",
-        fontFamily:
-          "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+        fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
         padding: 24,
       }}
     >
@@ -147,7 +146,14 @@ const ErrorFallback = ({ message }: ErrorFallbackProps): React.JSX.Element => {
           type="button"
           onClick={() => {
             writeRecoveryState({ count: 0, lastAt: 0 });
-            window.location.reload();
+            // 优先走主进程强制刷新：渲染进程自身状态可能已异常，
+            // location.reload() 可能无效；IPC 不可用时回退到它。
+            const reload = window.snow?.reloadWindow?.();
+            if (reload) {
+              reload.catch(() => window.location.reload());
+            } else {
+              window.location.reload();
+            }
           }}
           style={{
             marginTop: 20,

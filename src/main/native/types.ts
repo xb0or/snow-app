@@ -1552,6 +1552,10 @@ export type NativeBridge = {
   ) => Promise<void>;
   authorizeSensitiveCommand: (command: string, token: string) => Promise<void>;
   writeInteractiveStdin: (sessionId: string, input: string) => Promise<void>;
+  /** Registers the SSH remote-command dispatcher used by checkpoint APIs. */
+  setCheckpointRemoteCallback: (
+    callback: ((command: RemoteWorkspaceCommand) => Promise<string>) | null
+  ) => void;
   callMcpTool: (
     toolFullName: string,
     argsJson: string,

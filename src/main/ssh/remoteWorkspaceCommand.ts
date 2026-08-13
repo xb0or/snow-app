@@ -2,14 +2,18 @@ import { dirname } from "node:path/posix";
 import { processFileContent } from "../utils/fileReader";
 import {
   connectSsh,
+  deleteSshFile,
   disconnectSsh,
   executeSshCommand,
   listSshDirectory,
   parseSshUrl,
   readSshFile,
   readSshFileWithVersion,
+  removeEmptySshDirectory,
+  statSshEntry,
   isSshOperationError,
   toSshOperationErrorResult,
+  writeInternalSshFile,
   writeSshFile,
   type SshConnectParams,
   type SshFileVersion,
@@ -56,6 +60,7 @@ type RemoteWorkspaceCommandArgs = {
   conversationId?: unknown;
   toolCallId?: unknown;
   workspaceRoot?: unknown;
+  contentBase64?: unknown;
 };
 
 type RemoteWorkspaceSearchMatch = {
@@ -686,6 +691,212 @@ const executeBashCommand = async (
   );
 };
 
+// Mirrors SKIP_DIRS in native/src/storage/services/checkpoint/mod.rs so remote
+// checkpoint scans skip the same heavy directories as local scans.
+const CHECKPOINT_SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".svn",
+  ".hg",
+  "dist",
+  "build",
+  ".next",
+  ".nuxt",
+  "out",
+  "coverage",
+  ".cache",
+  ".turbo",
+  ".vercel",
+  "target",
+  "__pycache__",
+  ".venv",
+  "venv",
+  ".idea",
+  ".vscode",
+  ".vs",
+  ".snow",
+  ".snowapp",
+  "release",
+  ".output",
+  ".angular",
+  ".parcel-cache",
+]);
+
+const executeCheckpointStat = async (
+  args: RemoteWorkspaceCommandArgs,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> => {
+  const workspacePath = validateSshWorkspacePath(args.path, "path");
+  return withSshSession(
+    workspacePath,
+    async (sessionId, remotePath) => {
+      const stats = await statSshEntry(sessionId, remotePath);
+      if (!stats) {
+        return { exists: false, isDirectory: false, size: 0, mtimeMs: 0 };
+      }
+      return {
+        exists: true,
+        isDirectory: stats.isDirectory(),
+        size: stats.size,
+        mtimeMs: stats.mtime * 1000,
+      };
+    },
+    { signal }
+  );
+};
+
+const executeCheckpointListTree = async (
+  args: RemoteWorkspaceCommandArgs,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> => {
+  const workspacePath = validateSshWorkspacePath(args.path, "path");
+  return withSshSession(
+    workspacePath,
+    async (sessionId, remotePath) => {
+      const entries: Array<{
+        path: string;
+        isDirectory: boolean;
+        size: number;
+        mtimeMs: number;
+      }> = [];
+      // 每个目录的 .gitignore 内容（dir 为相对根目录的 POSIX 路径，
+      // 根目录为 ""）。Rust 侧复用与本地相同的 GitignoreMatcher 语义。
+      const gitignores: Array<{ dir: string; content: string }> = [];
+      const directories: Array<{ absolute: string; relative: string }> = [
+        { absolute: remotePath, relative: "" },
+      ];
+      while (directories.length > 0) {
+        const { absolute, relative } = directories.pop() as {
+          absolute: string;
+          relative: string;
+        };
+        const list = await listSshDirectory(sessionId, absolute, { signal });
+        for (const entry of list) {
+          // Symlinks are never captured (local scans skip them too).
+          if (entry.isSymbolicLink) {
+            continue;
+          }
+          const entryRelative = relative
+            ? `${relative}/${entry.name}`
+            : entry.name;
+          if (entry.isDirectory) {
+            if (!CHECKPOINT_SKIP_DIRS.has(entry.name)) {
+              directories.push({ absolute: entry.path, relative: entryRelative });
+            }
+            continue;
+          }
+          if (entry.name === ".gitignore") {
+            // 收集规则内容供 Rust 侧过滤；读取失败只丢规则不中断扫描。
+            try {
+              const buf = await readSshFile(sessionId, entry.path, { signal });
+              gitignores.push({
+                dir: relative,
+                content: buf.toString("utf-8"),
+              });
+            } catch {
+              // Best effort — the file tree scan continues without these rules.
+            }
+          }
+          entries.push({
+            path: entryRelative,
+            isDirectory: false,
+            size: entry.size,
+            mtimeMs: entry.mtime * 1000,
+          });
+        }
+      }
+      entries.sort((a, b) => a.path.localeCompare(b.path));
+      return { entries, gitignores };
+    },
+    { signal }
+  );
+};
+
+const executeCheckpointReadFile = async (
+  args: RemoteWorkspaceCommandArgs,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> => {
+  const workspacePath = validateSshWorkspacePath(args.path, "path");
+  return withSshSession(
+    workspacePath,
+    async (sessionId, remotePath) => {
+      let content: Buffer;
+      try {
+        content = await readSshFile(sessionId, remotePath, { signal });
+      } catch (error) {
+        if (isSshOperationError(error)) {
+          throw error;
+        }
+        // The file may have been removed between stat and read.
+        return { content: null };
+      }
+      return { content: content.toString("base64") };
+    },
+    { signal }
+  );
+};
+
+const executeCheckpointWriteFile = async (
+  args: RemoteWorkspaceCommandArgs,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> => {
+  const workspacePath = validateSshWorkspacePath(args.path, "path");
+  const contentBase64 = ensureString(args.contentBase64, "contentBase64");
+  const data = Buffer.from(contentBase64, "base64");
+  return withSshSession(
+    workspacePath,
+    async (sessionId, remotePath) => {
+      const parentPath = dirname(remotePath);
+      if (parentPath && parentPath !== ".") {
+        await executeSshCommand(
+          sessionId,
+          buildRemoteMkdirCommand(parentPath),
+          { signal }
+        );
+      }
+      const save = await writeInternalSshFile(sessionId, remotePath, data, {
+        signal,
+      });
+      return { bytes: save.bytes };
+    },
+    { signal }
+  );
+};
+
+const executeCheckpointDeleteFile = async (
+  args: RemoteWorkspaceCommandArgs,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> => {
+  const workspacePath = validateSshWorkspacePath(args.path, "path");
+  return withSshSession(
+    workspacePath,
+    async (sessionId, remotePath) => {
+      try {
+        await deleteSshFile(sessionId, remotePath);
+        return { deleted: true };
+      } catch {
+        return { deleted: false };
+      }
+    },
+    { signal }
+  );
+};
+
+const executeCheckpointRemoveDir = async (
+  args: RemoteWorkspaceCommandArgs,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> => {
+  const workspacePath = validateSshWorkspacePath(args.path, "path");
+  return withSshSession(
+    workspacePath,
+    async (sessionId, remotePath) => {
+      const removed = await removeEmptySshDirectory(sessionId, remotePath);
+      return { removed };
+    },
+    { signal }
+  );
+};
+
 export const dispatchRemoteWorkspaceCommand = async (
   command: RemoteWorkspaceCommand,
   options?: { signal?: AbortSignal }
@@ -715,6 +926,24 @@ export const dispatchRemoteWorkspaceCommand = async (
         break;
       case "bash-terminal-execute":
         result = await executeBashCommand(args, signal);
+        break;
+      case "checkpoint-stat":
+        result = await executeCheckpointStat(args, signal);
+        break;
+      case "checkpoint-list-tree":
+        result = await executeCheckpointListTree(args, signal);
+        break;
+      case "checkpoint-read-file":
+        result = await executeCheckpointReadFile(args, signal);
+        break;
+      case "checkpoint-write-file":
+        result = await executeCheckpointWriteFile(args, signal);
+        break;
+      case "checkpoint-delete-file":
+        result = await executeCheckpointDeleteFile(args, signal);
+        break;
+      case "checkpoint-remove-dir":
+        result = await executeCheckpointRemoveDir(args, signal);
         break;
       default:
         throw new Error(

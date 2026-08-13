@@ -74,7 +74,7 @@ export const useKeyboardShortcuts = (): void => {
 
       for (const action of SHORTCUT_ACTIONS) {
         const config = currentSettings[action];
-        if (!config.enabled) continue;
+        if (!config?.enabled) continue;
 
         if (!matchKey(event, config.key)) continue;
 

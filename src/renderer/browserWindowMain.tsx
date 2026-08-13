@@ -106,7 +106,8 @@ function DetachedBrowserWindowApp(): React.JSX.Element {
     [instanceId, title]
   );
 
-  useBrowserMcpCommandBridge(browserMcpCallbacks);
+  // 独立浏览器窗口无右侧面板折叠概念（窗口自身即浏览器），isCollapsed 固定 false。
+  useBrowserMcpCommandBridge(browserMcpCallbacks, false);
 
   // 元素选择确认后，本窗口派发 INSERT_ELEMENT_TAG_EVENT（useWebviewElementPicker
   // 的 confirmPicker）。本窗口没有 ChatInputView，事件无法跨渲染进程到达主窗口，

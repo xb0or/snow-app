@@ -444,6 +444,10 @@ export type ConversationContextValue = {
    *  parallel sub-agents each keep their own entry so the UI can match every
    *  SubAgentToolCall to the correct live session. */
   subAgentSessionEvents: Record<string, SubAgentSessionEvent>;
+  /** Live ref mirror of subAgentSessionEvents for async closures (agent
+   *  loops, sub-agent teammate communication) that must read the freshest
+   *  sub-agent status without React state staleness. */
+  subAgentSessionEventsRef: RefValue<Record<string, SubAgentSessionEvent>>;
   /** File changes recorded during this renderer session, keyed by
    *  conversationId. The main conversation collects both its own changes
    *  (agent: "main") and — via childSubAgentIds — every sub-agent's changes
@@ -744,6 +748,8 @@ export type UseChatConversationResult = {
     options: ScheduledTaskRunOptions | null
   ) => void;
   handleRollback: (messageId: string) => void;
+  /** 回滚变更计算中（弹窗弹出前）的消息 id，入口按钮据此显示 loading。 */
+  rollbackPreparingMessageId: string | null;
   rollbackPreview: RollbackPreview | null;
   confirmRollback: (mode: RollbackMode) => Promise<void>;
   cancelRollback: () => void;

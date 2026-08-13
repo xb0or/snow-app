@@ -42,10 +42,19 @@ export const useChatConversation = (
   const [subAgentSessionEvents, setSubAgentSessionEvents] = useState<
     ConversationContextValue["subAgentSessionEvents"]
   >({});
+  // Live ref mirror of subAgentSessionEvents so long-lived async closures
+  // (sub-agent loops, teammate communication tools) always read the freshest
+  // sub-agent status instead of a stale React state snapshot. Updated both
+  // during render and synchronously inside setSubAgentSessionEvent.
+  const subAgentSessionEventsRef = useRef<
+    ConversationContextValue["subAgentSessionEventsRef"]["current"]
+  >({});
+  subAgentSessionEventsRef.current = subAgentSessionEvents;
   // Upsert a single sub-agent event keyed by its conversationId so multiple
   // parallel sub-agents each keep their own live entry.
   const setSubAgentSessionEvent = useCallback(
     (event: ConversationContextValue["subAgentSessionEvents"][string]) => {
+      subAgentSessionEventsRef.current[event.conversationId] = event;
       setSubAgentSessionEvents((prev) => ({
         ...prev,
         [event.conversationId]: event,
@@ -377,6 +386,7 @@ export const useChatConversation = (
     conversationListVersion,
     upsertedConversation,
     subAgentSessionEvents,
+    subAgentSessionEventsRef,
     fileChangeStats,
     recordFileChange,
     mergeFileChangeStats,
@@ -691,6 +701,7 @@ export const useChatConversation = (
     pendingAutoSendOverride,
     setPendingAutoSendOverride,
     handleRollback: rollbackApi.handleRollback,
+    rollbackPreparingMessageId: rollbackApi.preparingMessageId,
     rollbackPreview,
     confirmRollback: rollbackApi.confirmRollback,
     cancelRollback: rollbackApi.cancelRollback,

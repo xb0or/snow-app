@@ -21,6 +21,8 @@ type ChatItemProps = {
   isStreaming?: boolean;
   isCompleted?: boolean;
   subAgentConversations?: ChatConversationRecord[];
+  /** 子代理中待用户确认（提问/工具授权）的会话 id 集合 */
+  subAgentAttentionRequiredIds?: Set<string>;
   isSubAgentExpanded?: boolean;
   isMultiSelectMode?: boolean;
   isSelected?: boolean;
@@ -47,6 +49,7 @@ export function ChatItem({
   isStreaming = false,
   isCompleted = false,
   subAgentConversations = [],
+  subAgentAttentionRequiredIds = new Set<string>(),
   isSubAgentExpanded = false,
   isMultiSelectMode = false,
   isSelected = false,
@@ -143,15 +146,21 @@ export function ChatItem({
 
   const isPinned = conversation.status === "pin";
   // 运行中的会话（流式输出中或等待输入）不提供操作菜单，
-  // 避免运行中的会话被删除造成数据混乱
-  const isRunning = isStreaming || isAttentionRequired;
+  // 避免运行中的会话被删除造成数据混乱；子代理待确认同样暂停了整体流程
+  const hasAttentionRequiredSubAgent =
+    subAgentConversations.some((sub) =>
+      subAgentAttentionRequiredIds.has(sub.conversationId)
+    );
+  const isRunning =
+    isStreaming || isAttentionRequired || hasAttentionRequiredSubAgent;
   const isForked = conversation.forkedFromConversationId !== "";
   const hasEmoji = conversation.emoji.trim() !== "";
   const displayName =
     conversation.summary ||
     conversation.title ||
     t("sidebar.untitledChat", { defaultValue: "Untitled" });
-  const showAttentionStatus = !isMultiSelectMode && isAttentionRequired;
+  const showAttentionStatus =
+    !isMultiSelectMode && (isAttentionRequired || hasAttentionRequiredSubAgent);
   const showStreamingStatus =
     !isMultiSelectMode && !showAttentionStatus && isStreaming;
   const showCompletedStatus =
@@ -206,8 +215,13 @@ export function ChatItem({
     onToggleSubAgentPanel?.();
   };
 
+  const attentionRequiredSubAgentCount = subAgentConversations.filter((sub) =>
+    subAgentAttentionRequiredIds.has(sub.conversationId)
+  ).length;
   const runningSubAgentCount = subAgentConversations.filter(
-    (sub) => sub.subAgentStatus === "running"
+    (sub) =>
+      sub.subAgentStatus === "running" &&
+      !subAgentAttentionRequiredIds.has(sub.conversationId)
   ).length;
 
   return (
@@ -335,6 +349,15 @@ export function ChatItem({
               {hasSubAgents && runningSubAgentCount > 0 && (
                 <span className="chat-item-sub-agent-count">
                   {runningSubAgentCount}
+                </span>
+              )}
+              {hasSubAgents && attentionRequiredSubAgentCount > 0 && (
+                <span
+                  className="chat-item-sub-agent-count attention"
+                  title={statusDescription}
+                  aria-label={statusDescription}
+                >
+                  {attentionRequiredSubAgentCount}
                 </span>
               )}
               <span className="chat-item-time">{timeLabel}</span>

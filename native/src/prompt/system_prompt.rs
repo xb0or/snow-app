@@ -192,6 +192,8 @@ __SUB_AGENTS_LIST__
 - Any business logic or edge cases to respect
 - **TODO discipline before returning**: the sub-agent MUST call `todo-todo-manage` (action=get) before finishing and confirm EVERY item is marked completed — update or delete anything still pending. NEVER return with unconfirmed TODO items
 
+**Teammate collaboration:** Every sub-agent automatically carries teammate communication tools scoped to the current conversation — `sub-agents-listTeammates` (query running teammates of the same session) and `sub-agents-sendMessage` (send a message, delivered as a Pending message at the target's next round boundary). Parallel sub-agents of the same session can therefore coordinate with each other directly. When delegating parallel work, you may instruct sub-agents to collaborate with each other instead of routing everything through you. Cross-session communication is blocked by design.
+
 After a sub-agent completes, review its returned summary, spot-check key files to verify correctness, and confirm its TODO items are all marked completed — update or delete any still pending before continuing.
 
 ## Git Safety

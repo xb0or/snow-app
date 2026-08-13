@@ -112,7 +112,8 @@ export const openBrowserDevTools = (contents: WebContents): void => {
       return;
     }
     void devToolsWindow.webContents
-      .executeJavaScript(`
+      .executeJavaScript(
+        `
         (() => {
           const marker = "data-snow-devtools-favicon";
           let link = document.head?.querySelector(
@@ -132,7 +133,8 @@ export const openBrowserDevTools = (contents: WebContents): void => {
           }
           link.setAttribute("href", ${JSON.stringify(snowFaviconDataUrl)});
         })();
-      `)
+      `
+      )
       .catch(() => {
         // DevTools 正在关闭时执行脚本可能失败，无需影响窗口生命周期。
       });
@@ -228,6 +230,16 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
   // 下次启动回退到默认窗口尺寸。
   ipcMain.handle("window:clear-state", async () => {
     await clearWindowState();
+  });
+
+  // 错误边界"重新加载"按钮：由主进程强制刷新渲染进程。
+  // 渲染进程自身状态可能已异常（如 React 渲染错误），此时
+  // location.reload() 可能无效，主进程 webContents.reload() 始终可靠。
+  ipcMain.handle("window:reload", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      win.webContents.reload();
+    }
   });
 
   // 渲染进程保存快捷键设置后调用：重新读取数据库并注册/注销
@@ -328,12 +340,7 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
   // 经 query 传给独立窗口入口重建完整标签页。原 tab 由渲染端在成功后关闭。
   ipcMain.handle(
     "browser:open-detached-window",
-    (
-      _event,
-      instanceId: unknown,
-      url: unknown,
-      tabs: unknown
-    ) => {
+    (_event, instanceId: unknown, url: unknown, tabs: unknown) => {
       if (typeof instanceId !== "string" || !instanceId.trim()) {
         throw new Error("A valid browser instanceId is required");
       }
@@ -349,11 +356,7 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
               typeof (tab as Record<string, unknown>).title === "string"
           )
         : undefined;
-      createDetachedBrowserWindow(
-        instanceId.trim(),
-        url.trim(),
-        tabSnapshot
-      );
+      createDetachedBrowserWindow(instanceId.trim(), url.trim(), tabSnapshot);
     }
   );
 
@@ -523,12 +526,7 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
   // 网络请求详情：请求/响应头 + 请求体 + 响应体（基于 CDP 记录中的 requestId）。
   ipcMain.handle(
     "browser:network-details",
-    (
-      _event,
-      webContentsId: number,
-      requestId: string,
-      maxBodyBytes?: number
-    ) =>
+    (_event, webContentsId: number, requestId: string, maxBodyBytes?: number) =>
       queryNetworkDetails(
         typeof webContentsId === "number" ? webContentsId : -1,
         typeof requestId === "string" ? requestId : "",
@@ -550,7 +548,9 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
     (_event, webContentsId: number, rules: unknown) =>
       setBrowserRouteRules(
         typeof webContentsId === "number" ? webContentsId : -1,
-        Array.isArray(rules) ? (rules as Parameters<typeof setBrowserRouteRules>[1]) : []
+        Array.isArray(rules)
+          ? (rules as Parameters<typeof setBrowserRouteRules>[1])
+          : []
       )
   );
   ipcMain.handle("browser:route-clear", (_event, webContentsId: number) =>
@@ -579,12 +579,7 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
   // 列出当前会话 cookie（默认脱敏值，showValues=true 返回明文）。
   ipcMain.handle(
     "browser:cookies-list",
-    (
-      _event,
-      webContentsId: number,
-      domain?: string,
-      showValues?: boolean
-    ) =>
+    (_event, webContentsId: number, domain?: string, showValues?: boolean) =>
       listBrowserCookies(
         typeof webContentsId === "number" ? webContentsId : -1,
         typeof domain === "string" ? domain : undefined,
@@ -594,12 +589,7 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
   // 删除指定 cookie（name + domain 精确定位）。
   ipcMain.handle(
     "browser:cookie-delete",
-    (
-      _event,
-      webContentsId: number,
-      name: string,
-      domain: string
-    ) =>
+    (_event, webContentsId: number, name: string, domain: string) =>
       deleteBrowserCookie(
         typeof webContentsId === "number" ? webContentsId : -1,
         typeof name === "string" ? name : "",
@@ -619,18 +609,11 @@ export const registerWindowHandlers = (_native: NativeBridge): void => {
     return { cleared };
   });
   ipcMain.handle("browser:dialogs-list", (_event, webContentsId: number) =>
-    listPendingDialogs(
-      typeof webContentsId === "number" ? webContentsId : -1
-    )
+    listPendingDialogs(typeof webContentsId === "number" ? webContentsId : -1)
   );
   ipcMain.handle(
     "browser:dialog-respond",
-    (
-      _event,
-      webContentsId: number,
-      accept: boolean,
-      promptText?: string
-    ) =>
+    (_event, webContentsId: number, accept: boolean, promptText?: string) =>
       respondPendingDialog(
         typeof webContentsId === "number" ? webContentsId : -1,
         accept === true,

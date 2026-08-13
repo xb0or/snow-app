@@ -34,6 +34,13 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
+/** 子代理队友通信工具：所有子代理默认携带（Rust collect_allowed_mcp_tools
+ *  无条件追加定义；执行在渲染进程完成）。 */
+export const SUB_AGENT_COMMS_TOOL_NAMES = new Set([
+  "sub-agents-listTeammates",
+  "sub-agents-sendMessage",
+]);
+
 export type SubAgentActivationDeps = {
   ctx: ConversationContextValue;
   requestToolAuthorizations: (
@@ -268,6 +275,121 @@ export const createSubAgentActivation = (deps: SubAgentActivationDeps) => {
 
       const subAgentToolsJson = runtimeConfig.toolsJson;
       subAgentName = runtimeConfig.agentName;
+
+      // ---------------------------------------------------------------------
+      // 子代理队友通信（sub-agents-listTeammates / sub-agents-sendMessage）
+      // 在渲染进程直接执行：在线队友状态（subAgentSessionEventsRef）与
+      // Pending 消息队列（pendingQueueRef）都只存在于渲染进程，Rust 无法
+      // 感知。会话隔离：只允许同一 parentConversationId 下的子代理互相
+      // 可见、互相通信，跨会话查询/发送一律拒绝。
+      // ---------------------------------------------------------------------
+      const executeSubAgentCommsTool = async (
+        toolName: string,
+        argsJson: string,
+        senderConvId: string,
+        senderAgentName: string
+      ): Promise<string> => {
+        let args: Record<string, unknown>;
+        try {
+          args = JSON.parse(argsJson) as Record<string, unknown>;
+        } catch {
+          return JSON.stringify({
+            success: false,
+            error: "Invalid JSON arguments",
+          });
+        }
+
+        const eventMap = ctx.subAgentSessionEventsRef.current;
+
+        if (toolName === "sub-agents-listTeammates") {
+          const teammates = Object.values(eventMap)
+            .filter(
+              (event) =>
+                event.parentConversationId === parentConversationId &&
+                event.conversationId !== senderConvId &&
+                event.status === "running" &&
+                !ctx.sessionsRefData.current.get(event.conversationId)
+                  ?.subAgentTerminated
+            )
+            .map((event) => ({
+              conversationId: event.conversationId,
+              agentId: event.agentId,
+              agentName: event.agentName,
+            }));
+          return JSON.stringify({ success: true, teammates });
+        }
+
+        if (toolName === "sub-agents-sendMessage") {
+          const targetConvId =
+            typeof args.conversationId === "string"
+              ? args.conversationId.trim()
+              : "";
+          const message =
+            typeof args.message === "string" ? args.message.trim() : "";
+          if (!targetConvId || !message) {
+            return JSON.stringify({
+              success: false,
+              error: "conversationId and message are required",
+            });
+          }
+          if (targetConvId === senderConvId) {
+            return JSON.stringify({
+              success: false,
+              error: "Cannot send a message to yourself",
+            });
+          }
+
+          // 会话隔离：目标必须是同一父会话下的子代理。
+          const targetEvent = eventMap[targetConvId];
+          if (
+            !targetEvent ||
+            targetEvent.parentConversationId !== parentConversationId
+          ) {
+            return JSON.stringify({
+              success: false,
+              error:
+                "Target sub-agent does not exist or belongs to another conversation (session isolation: teammates must be in the same session)",
+            });
+          }
+          // 只允许发给仍在运行的子代理：消息以 Pending 形式进入目标会话的
+          // 队列，由目标循环在下一回合边界自动切入。
+          if (
+            targetEvent.status !== "running" ||
+            ctx.sessionsRefData.current.get(targetConvId)?.subAgentTerminated
+          ) {
+            return JSON.stringify({
+              success: false,
+              error:
+                "Target sub-agent is no longer running; messages can only be sent to teammates that are still active",
+            });
+          }
+
+          // 消息自带发送方标识，目标子代理收到后可知来源。
+          const queuedText = `[来自子代理 ${senderAgentName} (${senderConvId})]\n${message}`;
+          const queue = ctx.pendingQueueRef.current.get(targetConvId) ?? [];
+          queue.push({ text: queuedText, options: {} });
+          ctx.pendingQueueRef.current.set(targetConvId, queue);
+          // 目标会话若正处于激活状态，让 Pending 消息气泡实时可见。
+          if (ctx.activeConversationIdRef.current === targetConvId) {
+            ctx.setActivePendingMessages(queue.map((item) => item.text));
+          }
+
+          return JSON.stringify({
+            success: true,
+            queued: true,
+            recipient: {
+              conversationId: targetConvId,
+              agentName: targetEvent.agentName,
+            },
+            note: "The message was queued as a Pending message and will be delivered to the target at the end of its current round.",
+          });
+        }
+
+        return JSON.stringify({
+          success: false,
+          error: `Unknown sub-agent communication tool: ${toolName}`,
+        });
+      };
 
       const subConvId = subConversationId!;
       ctx.ensureSession(subConvId, dirId);
@@ -736,21 +858,59 @@ export const createSubAgentActivation = (deps: SubAgentActivationDeps) => {
           let subResult: string;
           let subToolErrored = false;
           try {
-            subResult = await window.snow.callMcpTool(
-              subToolCall.name,
-              subToolArgs,
-              dirId,
-              parentCheckpointIds,
-              subCheckpointWorkDir,
-              subSensitiveAuthorizationToken,
-              (chunk) => {
-                if (!chunk.data) {
-                  return;
-                }
-                if (
-                  chunk.stream === "interactive_session" ||
-                  chunk.stream === "tool_execution"
-                ) {
+            if (SUB_AGENT_COMMS_TOOL_NAMES.has(subToolCall.name)) {
+              // 队友通信工具由渲染进程直接执行（会话隔离与 Pending 队列
+              // 都在渲染进程），不走 Rust callMcpTool。
+              subResult = await executeSubAgentCommsTool(
+                subToolCall.name,
+                subToolArgs,
+                subConvId,
+                subAgentName ?? agentId
+              );
+            } else {
+              subResult = await window.snow.callMcpTool(
+                subToolCall.name,
+                subToolArgs,
+                dirId,
+                parentCheckpointIds,
+                subCheckpointWorkDir,
+                subSensitiveAuthorizationToken,
+                (chunk) => {
+                  if (!chunk.data) {
+                    return;
+                  }
+                  if (
+                    chunk.stream === "interactive_session" ||
+                    chunk.stream === "tool_execution"
+                  ) {
+                    ctx.updateSessionMessages(subConvId, (currentMessages) =>
+                      currentMessages.map((currentMessage) => {
+                        if (currentMessage.id !== subAssistantMessageId) {
+                          return currentMessage;
+                        }
+                        return {
+                          ...currentMessage,
+                          toolCalls: updateFirstMatchingToolCall(
+                            currentMessage.toolCalls,
+                            subToolCall,
+                            ["pending", "running"],
+                            (currentToolCall) => ({
+                              ...currentToolCall,
+                              interactiveSessionId:
+                                chunk.stream === "interactive_session"
+                                  ? chunk.data
+                                  : currentToolCall.interactiveSessionId,
+                              toolExecutionId:
+                                chunk.stream === "tool_execution"
+                                  ? chunk.data
+                                  : currentToolCall.toolExecutionId,
+                            })
+                          ),
+                        };
+                      })
+                    );
+                    return;
+                  }
                   ctx.updateSessionMessages(subConvId, (currentMessages) =>
                     currentMessages.map((currentMessage) => {
                       if (currentMessage.id !== subAssistantMessageId) {
@@ -764,62 +924,35 @@ export const createSubAgentActivation = (deps: SubAgentActivationDeps) => {
                           ["pending", "running"],
                           (currentToolCall) => ({
                             ...currentToolCall,
-                            interactiveSessionId:
-                              chunk.stream === "interactive_session"
-                                ? chunk.data
-                                : currentToolCall.interactiveSessionId,
-                            toolExecutionId:
-                              chunk.stream === "tool_execution"
-                                ? chunk.data
-                                : currentToolCall.toolExecutionId,
+                            streamingStdout:
+                              chunk.stream === "stdout"
+                                ? `${currentToolCall.streamingStdout ?? ""}${
+                                    chunk.data
+                                  }`
+                                : currentToolCall.streamingStdout,
+                            streamingStderr:
+                              chunk.stream === "stderr"
+                                ? `${currentToolCall.streamingStderr ?? ""}${
+                                    chunk.data
+                                  }`
+                                : currentToolCall.streamingStderr,
                           })
                         ),
                       };
                     })
                   );
-                  return;
-                }
-                ctx.updateSessionMessages(subConvId, (currentMessages) =>
-                  currentMessages.map((currentMessage) => {
-                    if (currentMessage.id !== subAssistantMessageId) {
-                      return currentMessage;
-                    }
-                    return {
-                      ...currentMessage,
-                      toolCalls: updateFirstMatchingToolCall(
-                        currentMessage.toolCalls,
-                        subToolCall,
-                        ["pending", "running"],
-                        (currentToolCall) => ({
-                          ...currentToolCall,
-                          streamingStdout:
-                            chunk.stream === "stdout"
-                              ? `${currentToolCall.streamingStdout ?? ""}${
-                                  chunk.data
-                                }`
-                              : currentToolCall.streamingStdout,
-                          streamingStderr:
-                            chunk.stream === "stderr"
-                              ? `${currentToolCall.streamingStderr ?? ""}${
-                                  chunk.data
-                                }`
-                              : currentToolCall.streamingStderr,
-                        })
-                      ),
-                    };
-                  })
-                );
-              },
-              subToolCall.interactionId,
-              allowedTools,
-              // These booleans carry only the parent conversation's Rust
-              // write-gate state; they do not enable Plan Mode for the sub-agent.
-              // Read from the parent session's own ref so a background parent
-              // keeps its gate even after the user switches conversations.
-              ctx.sessionsRefData.current.get(parentConversationId)?.planMode ??
-                ctx.planModeRef.current,
-              planApprovedSessionKeysRef.current.has(parentConversationId)
-            );
+                },
+                subToolCall.interactionId,
+                allowedTools,
+                // These booleans carry only the parent conversation's Rust
+                // write-gate state; they do not enable Plan Mode for the sub-agent.
+                // Read from the parent session's own ref so a background parent
+                // keeps its gate even after the user switches conversations.
+                ctx.sessionsRefData.current.get(parentConversationId)
+                  ?.planMode ?? ctx.planModeRef.current,
+                planApprovedSessionKeysRef.current.has(parentConversationId)
+              );
+            }
           } catch (err) {
             subToolErrored = true;
             const errorMessage = getErrorMessage(err);

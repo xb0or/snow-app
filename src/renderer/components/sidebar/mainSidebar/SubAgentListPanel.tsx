@@ -1,4 +1,10 @@
-import { AlertCircle, Bot, CheckCircle2, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  Bot,
+  CheckCircle2,
+  CircleAlert,
+  Loader2,
+} from "lucide-react";
 
 import { useI18n } from "../../../i18n";
 import type { ChatConversationRecord } from "../../../../preload";
@@ -6,10 +12,18 @@ import type { ChatConversationRecord } from "../../../../preload";
 type SubAgentListPanelProps = {
   conversations: ChatConversationRecord[];
   activeConversationId?: string;
+  /** 待用户确认的子代理会话 id 集合（提问或工具授权） */
+  attentionRequiredConversationIds?: Set<string>;
   onSelect?: (conversationId: string) => void;
 };
 
-function renderStatusIcon(status: string): React.ReactNode {
+function renderStatusIcon(
+  status: string,
+  isAttentionRequired: boolean
+): React.ReactNode {
+  if (isAttentionRequired) {
+    return <CircleAlert size={11} className="sub-agent-attention" />;
+  }
   if (status === "running") {
     return <Loader2 size={11} className="spin" />;
   }
@@ -32,6 +46,7 @@ function renderStatusIcon(status: string): React.ReactNode {
 export function SubAgentListPanel({
   conversations,
   activeConversationId,
+  attentionRequiredConversationIds,
   onSelect,
 }: SubAgentListPanelProps): React.JSX.Element {
   const { t } = useI18n();
@@ -45,37 +60,59 @@ export function SubAgentListPanel({
     onSelect?.(conversationId);
   };
 
+  const attentionDescription = t("sidebar.chatStatusWaitingForReviewOrInput", {
+    defaultValue: "Waiting for review or input",
+  });
+
   return (
     <div className="sub-agent-list-panel">
-      {conversations.map((subAgent) => (
-        <div
-          key={subAgent.conversationId}
-          className={`sub-agent-list-item${
-            subAgent.conversationId === activeConversationId ? " active" : ""
-          }`}
-          onClick={(event) =>
-            handleItemClick(event, subAgent.conversationId)
-          }
-          role="button"
-          tabIndex={0}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              onSelect?.(subAgent.conversationId);
+      {conversations.map((subAgent) => {
+        const isAttentionRequired =
+          attentionRequiredConversationIds?.has(subAgent.conversationId) ??
+          false;
+        return (
+          <div
+            key={subAgent.conversationId}
+            className={`sub-agent-list-item${
+              subAgent.conversationId === activeConversationId ? " active" : ""
+            }`}
+            onClick={(event) =>
+              handleItemClick(event, subAgent.conversationId)
             }
-          }}
-        >
-          <span className="sub-agent-list-icon">
-            {renderStatusIcon(subAgent.subAgentStatus)}
-          </span>
-          <span className="sub-agent-list-name">
-            {subAgent.subAgentName ||
-              subAgent.title ||
-              t("sidebar.subAgent", { defaultValue: "Sub-agent" })}
-          </span>
-        </div>
-      ))}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onSelect?.(subAgent.conversationId);
+              }
+            }}
+          >
+            <span className="sub-agent-list-icon">
+              {renderStatusIcon(subAgent.subAgentStatus, isAttentionRequired)}
+            </span>
+            <span className="sub-agent-list-name-row">
+              <span className="sub-agent-list-name">
+                {subAgent.subAgentName ||
+                  subAgent.title ||
+                  t("sidebar.subAgent", { defaultValue: "Sub-agent" })}
+              </span>
+              {isAttentionRequired && (
+                <span
+                  className="chat-item-status-label attention-required"
+                  title={attentionDescription}
+                  aria-label={attentionDescription}
+                >
+                  {t("sidebar.chatStatusNeedsAction", {
+                    defaultValue: "Needs action",
+                  })}
+                </span>
+              )}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

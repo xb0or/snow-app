@@ -20,6 +20,7 @@ import {
   Search,
   Send,
   Settings,
+  ShieldAlert,
   Square,
   Target,
   Trash2,
@@ -31,6 +32,7 @@ import { createPortal } from "react-dom";
 import { useI18n } from "../../../i18n";
 import { Modal } from "../../common/Modal";
 import { ContextMenu } from "../../common/ContextMenu";
+import { Tooltip } from "../../common/Tooltip";
 import type { ChatInputViewProps } from "./types";
 import { TEXT_SNIPPET_THRESHOLD } from "./constants";
 import { ThinkingStrengthMenu } from "./ThinkingStrengthMenu";
@@ -231,6 +233,20 @@ export const ChatInputView = ({
     handlePause,
     handleResume,
   } = useChatConversationContext();
+  // 用户发送过的历史消息（终端式 ↑/↓ 回溯用）：按时间正序保留。
+  // 过滤压缩摘要（isContextCompaction）等非用户真实输入的系统消息。
+  const userHistoryMessages = useMemo(
+    () =>
+      messages.filter(
+        (message) =>
+          message.role === "user" &&
+          !message.isContextCompaction &&
+          message.content.trim().length > 0
+      ),
+    [messages]
+  );
+  // 历史回溯游标：-1 = 未回溯（空白输入）；0..n-1 = 从最近一条起算的下标
+  const historyIndexRef = useRef(-1);
   const fallbackFileChanges = useMemo(() => {
     if (!activeConversationId) {
       return [];
@@ -1569,6 +1585,76 @@ export const ChatInputView = ({
     checkInputTriggers();
   }, [syncContent, checkInputTriggers]);
 
+  /**
+   * 终端式历史回溯：↑ 依次向前（最近 → 更早），↓ 反向回退直到空白。
+   * 返回 true 表示已消费该方向键（调用方应 preventDefault）。
+   * 输入框非空且未处于回溯状态时，↑ 不拦截（保持默认光标移动行为）。
+   */
+  const recallHistory = useCallback(
+    (direction: "up" | "down"): boolean => {
+      const count = userHistoryMessages.length;
+      if (count === 0) {
+        return false;
+      }
+      const current = historyIndexRef.current;
+      if (direction === "up") {
+        if (current === -1 && value.trim() !== "") {
+          return false;
+        }
+        const next = current === -1 ? 0 : Math.min(current + 1, count - 1);
+        historyIndexRef.current = next;
+        restoreContent(userHistoryMessages[count - 1 - next].content);
+        return true;
+      }
+      if (current === -1) {
+        return false;
+      }
+      if (current === 0) {
+        // 已回溯到最近一条，↓ 回到空白输入状态
+        historyIndexRef.current = -1;
+        restoreContent("");
+        return true;
+      }
+      const next = current - 1;
+      historyIndexRef.current = next;
+      restoreContent(userHistoryMessages[count - 1 - next].content);
+      return true;
+    },
+    [restoreContent, userHistoryMessages, value]
+  );
+
+  // 输入框未聚焦（焦点在 body）时，↑/↓ 同样触发历史回溯，实现
+  // "未聚焦状态按 ↑ 直接调出最近一条用户消息"。仅当没有任何元素持有
+  // 焦点时处理，避免劫持文件树等其它组件的方向键操作。
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+        return;
+      }
+      const el = textareaRef.current;
+      if (!el) {
+        return;
+      }
+      // 输入框聚焦时由 contentEditable 的 onKeyDown 处理，避免重复消费
+      if (document.activeElement === el) {
+        return;
+      }
+      if (document.activeElement !== document.body) {
+        return;
+      }
+      if (recallHistory(event.key === "ArrowUp" ? "up" : "down")) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => window.removeEventListener("keydown", onWindowKeyDown);
+  }, [recallHistory, textareaRef]);
+
+  // 切换会话时重置回溯游标，避免跨会话串味
+  useEffect(() => {
+    historyIndexRef.current = -1;
+  }, [activeConversationId]);
+
   const handleInputKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const nativeEvent = event.nativeEvent;
@@ -1578,6 +1664,17 @@ export const ChatInputView = ({
 
       if (isComposing) {
         return;
+      }
+
+      // 发送后输入框被清空，回溯游标归位（下次 ↑ 从最近一条开始）
+      if (
+        event.key === "Enter" &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        historyIndexRef.current = -1;
       }
 
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -1601,9 +1698,17 @@ export const ChatInputView = ({
         }
       }
 
+      // ↑/↓ 历史回溯：command/mention 面板打开时方向键已由面板消费
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        if (recallHistory(event.key === "ArrowUp" ? "up" : "down")) {
+          event.preventDefault();
+          return;
+        }
+      }
+
       handleKeyDown(event);
     },
-    [handleKeyDown, isCommandOpen, isMentionOpen, syncContent]
+    [handleKeyDown, isCommandOpen, isMentionOpen, recallHistory, syncContent]
   );
 
   const showImagePreview = useCallback(
@@ -2644,6 +2749,19 @@ export const ChatInputView = ({
                   >
                     <Target size={14} />
                   </span>
+                </>
+              )}
+              {yoloMode && (
+                <>
+                  <span className="toolbar-divider" aria-hidden="true" />
+                  <Tooltip content={t("plusMenu.yoloModeActive")}>
+                    <span
+                      className="plan-mode-badge yolo-mode-badge"
+                      aria-label={t("plusMenu.yoloModeActive")}
+                    >
+                      <ShieldAlert size={14} />
+                    </span>
+                  </Tooltip>
                 </>
               )}
             </div>

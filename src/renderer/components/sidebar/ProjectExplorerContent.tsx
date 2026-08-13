@@ -504,6 +504,9 @@ export function ProjectExplorerContent({
 
   const handleRefresh = useCallback((): void => {
     setExpandedPaths(new Set());
+    // SSH 目录无文件监听：刷新时清空缓存树，否则旧子目录
+    // 会经 mergeTreeNodes 被当作有效数据保留，重新展开不重新读取
+    setTree([]);
     void loadRootDirectory();
   }, [loadRootDirectory]);
 
@@ -1054,9 +1057,11 @@ export function ProjectExplorerContent({
               {rootPath}
             </span>
             {isSsh && sshConnectionStatus ? (
-              <span className={`explorer-connection-status ${sshConnectionStatus}`}>
-                {sshConnectionStatus}
-              </span>
+              <span
+                className={`explorer-connection-status-dot ${sshConnectionStatus}`}
+                title={sshConnectionStatus}
+                aria-label={sshConnectionStatus}
+              />
             ) : null}
           </div>
         ) : null}

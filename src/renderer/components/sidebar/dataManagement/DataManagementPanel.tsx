@@ -46,7 +46,6 @@ export function DataManagementPanel({
     settings,
     progress,
     isLoading,
-    isSaving,
     error,
     updateSettings,
     previewImport,
@@ -180,7 +179,6 @@ export function DataManagementPanel({
         <BackupRestoreTab
           state={state}
           settings={settings}
-          isSaving={isSaving}
           onUpdateSettings={updateSettings}
           onCreate={createBackup}
           onRestore={restoreBackup}
@@ -190,7 +188,6 @@ export function DataManagementPanel({
         <CloudSyncTab
           state={state}
           settings={settings}
-          isSaving={isSaving}
           onUpdateSettings={updateSettings}
           onTestConnection={testSync}
           onSync={runSync}

@@ -946,8 +946,10 @@ const ChatContentBody = ({
   );
 
   const handleConfirmRollback = useCallback(
-    (mode: RollbackMode): void => {
-      void confirmRollback(mode);
+    async (mode: RollbackMode): Promise<void> => {
+      // 返回真实 Promise：RollbackConfirmDialog 的确认按钮据此在整个
+      // 回滚期间（含 SSH 文件恢复）保持 loading，完成后再关闭弹窗。
+      await confirmRollback(mode);
     },
     [confirmRollback]
   );

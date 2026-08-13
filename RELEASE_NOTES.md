@@ -1,5 +1,41 @@
 # Release Notes
 
+## v0.2.0
+
+## New Features
+
+- **Teammate Communication Tools**: Sub-agents can now communicate with teammates in the same session via `listTeammates` / `sendMessage` tools.
+- **YOLO Mode Active Badge**: The chat input shows a badge with tooltip when YOLO mode is active.
+
+## Improvements
+
+- Shortcut key settings panel optimized; error boundary refresh mechanism enhanced.
+
+## Bug Fixes
+
+- Fixed optional chaining access in multiple places; cleaned up old local bindings.
+
+## v0.1.28
+
+## New Features
+
+- **Data Management**: New settings for configuration migration, local backups, restore, and encrypted WebDAV sync; settings auto-save, backup location supports directory browsing, and the UI is localized (en/zh-CN/zh-TW).
+- **SSH Workspace Checkpoints**: Checkpoint create/restore/list/diff now work on ssh:// workspaces via an SFTP remote file access layer, with a loading state in the rollback dialog.
+- **Object Store Checkpoints**: Checkpoints are rewritten as a self-contained BLAKE3 content-addressed object store with an mtime/size fingerprint cache — no longer dependent on git state or reflink; identical content is stored once, avoiding full copies for non-git projects.
+- **Bash Indirect Script Detection**: Sensitive command detection now covers indirect script execution (`bash script.sh` / `source`), matching against the script content and annotating the source path.
+- **SSH Path Interception**: Tool calls intercept access to remote paths outside the project workspace.
+- **Input History Recall**: The chat input recalls history messages with the ↑/↓ keys.
+- **Sub-Agent Pending Status**: The sidebar shows sub-agent pending confirmation (question/tool authorization) status and pins parent sessions on demand.
+- **MCP Browser Panel Auto-Expand**: Browser commands automatically expand a collapsed panel before execution, so screenshots no longer capture blank images.
+
+## Improvements
+
+- The oversized native Rust file is split into submodules (browser import, vision, MCP, storage export, checkpoint, git, gallery, etc.); storage model structs are extracted into a standalone `models.rs`.
+
+## Bug Fixes
+
+- Git logs now use `git log -m --first-parent`, fixing empty file lists and diffs for merge commits.
+
 ## v0.1.27
 
 ## New Features

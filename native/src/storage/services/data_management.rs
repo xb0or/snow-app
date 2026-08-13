@@ -78,8 +78,6 @@ struct ConfigBundleInput {
     format_version: i64,
     schema_version: i64,
     sections: Vec<String>,
-    #[serde(default)]
-    contains_secrets: bool,
     tables: BTreeMap<String, Vec<Value>>,
 }
 

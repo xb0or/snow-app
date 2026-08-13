@@ -148,6 +148,24 @@ export function ChatsSection({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [subAgentMap, setSubAgentMap] = useState<SubAgentMap>({});
+  // 含待确认子代理的父会话也视为需关注：与运行中会话一样置顶排序，
+  // 保证会话较多时用户不会漏掉被暂停等待确认的子代理
+  const surfacedConversationIds = useMemo(() => {
+    if (attentionRequiredConversationIds.size === 0) {
+      return runningConversationIds;
+    }
+    const next = new Set(runningConversationIds);
+    for (const [parentId, subs] of Object.entries(subAgentMap)) {
+      if (
+        subs.some((sub) =>
+          attentionRequiredConversationIds.has(sub.conversationId)
+        )
+      ) {
+        next.add(parentId);
+      }
+    }
+    return next;
+  }, [runningConversationIds, attentionRequiredConversationIds, subAgentMap]);
   const [expandedSubAgentConversationIds, setExpandedSubAgentConversationIds] =
     useState<Set<string>>(() => new Set());
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
@@ -991,7 +1009,7 @@ export function ChatsSection({
   const timeGroups = groupConversationsByTime(
     conversations,
     new Date(),
-    runningConversationIds
+    surfacedConversationIds
   );
 
   useEffect(() => {
@@ -1797,6 +1815,9 @@ export function ChatsSection({
                                 conversation.conversationId
                               )}
                               subAgentConversations={subAgentConversations}
+                              subAgentAttentionRequiredIds={
+                                attentionRequiredConversationIds
+                              }
                               isSubAgentExpanded={isSubAgentPanelExpanded}
                               isMultiSelectMode={isMultiSelectMode}
                               isSelected={selectedIds.has(
@@ -1856,6 +1877,9 @@ export function ChatsSection({
                                 <SubAgentListPanel
                                   conversations={subAgentConversations}
                                   activeConversationId={activeConversationId}
+                                  attentionRequiredConversationIds={
+                                    attentionRequiredConversationIds
+                                  }
                                   onSelect={(subConvId) =>
                                     void handleSelectConversation(
                                       subConvId,

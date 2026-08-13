@@ -452,7 +452,14 @@ export const useToolAuthorization = (ctx: ConversationContextValue) => {
       conversationId: string,
       projectId?: string
     ): Promise<ToolAuthorizationDecision> => {
-      if (toolCall.name === "user-interaction-askUserQuestion") {
+      if (
+        toolCall.name === "user-interaction-askUserQuestion" ||
+        toolCall.name === "sub-agents-listTeammates" ||
+        toolCall.name === "sub-agents-sendMessage"
+      ) {
+        // Internal sub-agent communication tools are always auto-approved:
+        // they are pure message-passing between teammates of the same
+        // session and must never block on a user confirmation dialog.
         return Promise.resolve({ status: "approved" });
       }
 

@@ -1,4 +1,4 @@
-mod exports;
+pub(crate) mod exports;
 mod hooks;
 mod mcp;
 pub mod prompt;

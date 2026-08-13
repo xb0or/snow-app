@@ -1,4 +1,7 @@
-import type { KeyboardShortcutAction, KeyboardShortcutsSettings } from "../../preload";
+import type {
+  KeyboardShortcutAction,
+  KeyboardShortcutsSettings,
+} from "../../preload";
 
 /**
  * 平台判断：macOS 使用 Cmd 键，其他平台使用 Ctrl 键。
@@ -41,7 +44,12 @@ export const eventToKey = (event: KeyboardEvent): string | null => {
   const isMac = isMacOS();
   const mod = isMac ? event.metaKey : event.ctrlKey;
   // 纯修饰键按下不可绑定
-  if (event.key === "Control" || event.key === "Meta" || event.key === "Shift" || event.key === "Alt") {
+  if (
+    event.key === "Control" ||
+    event.key === "Meta" ||
+    event.key === "Shift" ||
+    event.key === "Alt"
+  ) {
     return null;
   }
 
@@ -252,7 +260,7 @@ export const findConflicts = (
   const conflicts: KeyboardShortcutAction[] = [];
   for (const action of SHORTCUT_ACTIONS) {
     if (action === excludeAction) continue;
-    if (settings[action].key === targetKey) {
+    if (settings[action]?.key === targetKey) {
       conflicts.push(action);
     }
   }

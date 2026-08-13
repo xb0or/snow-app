@@ -1,11 +1,12 @@
 import { memo, useState } from "react";
-import { ChevronDown, Minimize2, Undo2 } from "lucide-react";
+import { ChevronDown, Loader2, Minimize2, Undo2 } from "lucide-react";
 import { useI18n } from "../../../../i18n";
 import { MarkdownBlock } from "./markdownRenderer";
 
 type CompactionMessageProps = {
   content: string;
   isStreaming: boolean;
+  isRollbackPreparing?: boolean;
   onRollback: () => void;
 };
 
@@ -13,6 +14,7 @@ export const CompactionMessage = memo(
   ({
     content,
     isStreaming,
+    isRollbackPreparing,
     onRollback,
   }: CompactionMessageProps): React.JSX.Element => {
     const { t } = useI18n();
@@ -66,9 +68,14 @@ export const CompactionMessage = memo(
               type="button"
               aria-label={t("chat.rollbackMessage")}
               title={t("chat.rollbackMessage")}
+              disabled={isRollbackPreparing}
               onClick={onRollback}
             >
-              <Undo2 size={15} strokeWidth={1.8} />
+              {isRollbackPreparing ? (
+                <Loader2 size={15} strokeWidth={1.8} className="spin" />
+              ) : (
+                <Undo2 size={15} strokeWidth={1.8} />
+              )}
             </button>
           ) : null}
         </div>

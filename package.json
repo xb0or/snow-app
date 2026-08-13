@@ -1,6 +1,6 @@
 {
   "name": "snow-app",
-  "version": "0.1.27",
+  "version": "0.2.0",
   "description": "Snow App The best AI Agent client in the universe",
   "author": {
     "name": "MayDay",
@@ -78,10 +78,11 @@
     "asar": true,
     "files": [
       "out/**",
-      "native/*.node",
+      "native/snow_native.*.node",
       "native/index.cjs",
       "package.json",
       "!native/snow_native.*.*.node",
+      "!native/index.*.node",
       "!**/node_modules/node-pty/build/deps/**",
       "!**/node_modules/node-pty/build/Release/*.iobj",
       "!**/node_modules/node-pty/build/Release/*.ipdb",
@@ -97,7 +98,7 @@
       "docs/**"
     ],
     "asarUnpack": [
-      "native/*.node",
+      "native/snow_native.*.node",
       "node_modules/node-pty/**",
       "node_modules/ssh2/**",
       "node_modules/cpu-features/**"

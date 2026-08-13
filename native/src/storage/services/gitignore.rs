@@ -36,6 +36,17 @@ struct ParsedPattern {
 }
 
 impl GitignoreMatcher {
+    /// Build a matcher from the root `.gitignore` content already fetched by
+    /// the caller. Used by the remote (SSH) checkpoint flow where the file is
+    /// read via SFTP instead of the local file system.
+    pub fn from_root_content(root_gitignore: Option<&str>) -> Self {
+        let mut patterns = Vec::new();
+        if let Some(content) = root_gitignore {
+            Self::parse_into(content, &mut patterns);
+        }
+        Self { patterns }
+    }
+
     /// Build a matcher by reading `.gitignore` files from the given root
     /// directory and all of its parent directories (mirroring git behaviour
     /// where parent `.gitignore` files also apply), plus the repository-local
@@ -100,7 +111,13 @@ impl GitignoreMatcher {
         let Ok(content) = fs::read_to_string(&gitignore_path) else {
             return;
         };
+        self.append_directory_content(dir_relative, &content);
+    }
 
+    /// Append subdirectory `.gitignore` rules from already-fetched content
+    /// (remote SSH flow: content arrives via SFTP). Scoping semantics are
+    /// identical to `load_directory_gitignore`.
+    pub fn append_directory_content(&mut self, dir_relative: &Path, content: &str) {
         let dir_rel = dir_relative.to_string_lossy().replace('\\', "/");
         let dir_segments: Vec<String> = dir_rel.split('/').map(String::from).collect();
 

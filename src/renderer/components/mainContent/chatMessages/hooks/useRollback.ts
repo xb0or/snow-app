@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import type {
   ConversationContextValue,
   CheckpointFileChange,
@@ -22,6 +22,12 @@ export const useRollback = (ctx: ConversationContextValue) => {
   const clearDraftToRestore = useCallback((): void => {
     ctx.setDraftToRestore(null);
   }, [ctx.setDraftToRestore]);
+
+  /** 正在计算变更（弹窗弹出前）的消息 id：SSH 下 listCheckpointChanges
+   *  经 SFTP 遍历可能较慢，入口按钮在此期间显示 loading。 */
+  const [preparingMessageId, setPreparingMessageId] = useState<string | null>(
+    null
+  );
 
   const handleRollback = useCallback(
     (messageId: string): void => {
@@ -72,6 +78,9 @@ export const useRollback = (ctx: ConversationContextValue) => {
       if (targetIndex === -1) {
         return;
       }
+      // 变更计算（SSH 下经 SFTP）期间入口按钮显示 loading，弹窗弹出或
+      // 失败后清除。
+      setPreparingMessageId(messageId);
 
       const targetMessage = messages[targetIndex];
       const messageContent = targetMessage.content;
@@ -123,21 +132,18 @@ export const useRollback = (ctx: ConversationContextValue) => {
       // Compute file changes for the confirmation dialog. This is async but
       // we set the preview state once the diff is ready.
       const computeAndPreview = async (): Promise<void> => {
-        let changes: CheckpointFileChange[] = [];
-        if (
-          checkpointId &&
-          sessionWorkDir &&
-          !sessionWorkDir.startsWith("ssh://")
-        ) {
-          try {
-            changes = await window.snow.listCheckpointChanges(
-              checkpointId,
-              sessionWorkDir
-            );
-          } catch {
-            // Best effort — show dialog without changes on error
+        try {
+          let changes: CheckpointFileChange[] = [];
+          if (checkpointId && sessionWorkDir) {
+            try {
+              changes = await window.snow.listCheckpointChanges(
+                checkpointId,
+                sessionWorkDir
+              );
+            } catch {
+              // Best effort — show dialog without changes on error
+            }
           }
-        }
 
         // Fetch TODO items that will be deleted alongside the rollback.
         let todoItems: RollbackTodoItem[] = [];
@@ -184,6 +190,9 @@ export const useRollback = (ctx: ConversationContextValue) => {
           summaryPromise:
             ctx.sessionsRefData.current.get(key)?.summaryPromise ?? null,
         });
+        } finally {
+          setPreparingMessageId(null);
+        }
       };
 
       void computeAndPreview();
@@ -261,16 +270,13 @@ export const useRollback = (ctx: ConversationContextValue) => {
         return;
       }
 
-      // Persistence succeeded — now update the UI.
-      ctx.updateSessionMessages(key, (currentMessages) => {
-        const targetIndex = currentMessages.findIndex(
-          (message) => message.id === messageId
-        );
-        return targetIndex === -1
-          ? currentMessages
-          : currentMessages.slice(0, targetIndex);
-      });
-
+      // Persistence succeeded — now update the UI. The message list update is
+      // intentionally deferred until AFTER the file restore: SSH rollback
+      // restores files over SFTP and can take a while, and the confirm dialog
+      // stays open with a loading button during that time. Updating the list
+      // here would show the rolled-back conversation while the dialog is still
+      // waiting, which feels broken. DB persistence already happened above, so
+      // the UI state below cannot diverge from disk.
       if (checkpointId) {
         const sessionRef = ctx.sessionsRefData.current.get(key);
         const checkpointIndex =
@@ -287,23 +293,34 @@ export const useRollback = (ctx: ConversationContextValue) => {
         }
 
         const shouldRestoreFiles =
-          mode === "conversation-and-files" &&
-          Boolean(preview.workDir) &&
-          !preview.workDir?.startsWith("ssh://");
+          mode === "conversation-and-files" && Boolean(preview.workDir);
         if (shouldRestoreFiles && preview.workDir) {
-          void window.snow
-            .restoreCheckpoint(checkpointId, preview.workDir)
-            .catch(() => {
-              // Best effort — file restore failure must not block rollback cleanup.
-            })
-            .finally(() => {
-              ctx.setConversationVersion((version) => version + 1);
-              deleteCheckpoints(discardedCheckpointIds);
-            });
+          // 等待文件恢复完成再关闭对话框：SSH 回滚经 SFTP 逐文件写回，
+          // 可能较慢，对话框确认按钮在此期间显示 loading。恢复失败不
+          // 阻塞消息清理（best effort，与旧行为一致）。
+          try {
+            await window.snow.restoreCheckpoint(checkpointId, preview.workDir);
+          } catch {
+            // Best effort — file restore failure must not block rollback cleanup.
+          } finally {
+            ctx.setConversationVersion((version) => version + 1);
+            deleteCheckpoints(discardedCheckpointIds);
+          }
         } else {
           deleteCheckpoints(discardedCheckpointIds);
         }
       }
+
+      // 文件恢复完成后再更新消息列表：弹窗此时仍打开（确认按钮 loading），
+      // 列表变化与弹窗关闭同步发生，避免"消息已回滚但弹窗还停着"的割裂。
+      ctx.updateSessionMessages(key, (currentMessages) => {
+        const targetIndex = currentMessages.findIndex(
+          (message) => message.id === messageId
+        );
+        return targetIndex === -1
+          ? currentMessages
+          : currentMessages.slice(0, targetIndex);
+      });
 
       if (isFirstMessage && !isContextCompaction && convId) {
         // 会话已被删除：刷新侧边栏列表，移除该会话
@@ -353,5 +370,6 @@ export const useRollback = (ctx: ConversationContextValue) => {
     handleRollback,
     confirmRollback,
     cancelRollback,
+    preparingMessageId,
   };
 };

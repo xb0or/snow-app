@@ -99,7 +99,7 @@ export const registerToggleWindowShortcut = async (
 
   const settings = await native.getKeyboardShortcutsSettings();
   const config = settings.toggleWindow;
-  if (!config.enabled) {
+  if (!config?.enabled) {
     return;
   }
 

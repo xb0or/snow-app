@@ -75,7 +75,10 @@ export type SshDirectoryEntry = {
   name: string;
   path: string;
   isDirectory: boolean;
+  isSymbolicLink: boolean;
   size: number;
+  /** POSIX mtime in whole seconds (SFTP attrs granularity). */
+  mtime: number;
 };
 
 export type SshSession = {
@@ -500,7 +503,9 @@ export const listSshDirectory = (
           name,
           path: fullPath,
           isDirectory,
+          isSymbolicLink: item.attrs.isSymbolicLink(),
           size: isDirectory ? 0 : item.attrs.size,
+          mtime: item.attrs.mtime,
         };
       });
 
@@ -1749,6 +1754,26 @@ export const renameSshFile = (
         return;
       }
       resolve();
+    });
+  });
+};
+
+export const removeEmptySshDirectory = (
+  sessionId: string,
+  remotePath: string
+): Promise<boolean> => {
+  return new Promise((resolve, reject) => {
+    const session = getSshSession(sessionId);
+    if (!session) {
+      reject(new Error("SSH session not found. Please reconnect."));
+      return;
+    }
+    session.sftp.rmdir(remotePath, (err) => {
+      if (err) {
+        resolve(false);
+        return;
+      }
+      resolve(true);
     });
   });
 };

@@ -1,6 +1,6 @@
 [package]
 name = "snow_native"
-version = "0.1.27"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 
@@ -18,8 +18,6 @@ napi = { version = "3.2.4", default-features = false, features = ["napi4", "asyn
 napi-derive = "3.2.4"
 reqwest = { version = "0.12.5", features = ["blocking", "json", "stream", "multipart", "gzip", "brotli", "deflate"] }
 flate2 = "1"
-# COW 文件克隆（APFS clonefile / Linux reflink），非 git 项目快照避免全量复制
-reflink = "0.1"
 libc = "0.2"
 tar = "0.4"
 rusqlite = { version = "0.32.1", features = ["bundled", "backup"] }

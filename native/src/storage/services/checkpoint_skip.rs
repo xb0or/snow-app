@@ -1,15 +1,15 @@
-//! 快照跳过策略：COW 克隆不可用时，回退普通复制所跳过的文件集合。
-//! 独立维护：只改本文件即可调整跳过范围，checkpoint 捕获逻辑无需改动。
+//! 内容抓取跳过策略：checkpoint 指纹捕获时跳过该文件（不哈希、不写入
+//! 对象库），其变更不可回滚。独立维护：只改本文件即可调整跳过范围。
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
-/// 回退复制时的单文件快照上限：超过则跳过（变更不可回滚）。COW 克隆不受此限制。
+/// 内容抓取的单文件上限：超过则跳过（变更不可回滚），避免大文件 IO。
 pub const PENDING_COPY_SIZE_LIMIT: u64 = 32 * 1024 * 1024;
 
-/// 回退复制时跳过的扩展名（AI 工具几乎不会修改的文件）。
+/// 抓取时跳过的扩展名（AI 工具几乎不会修改的文件）。
 ///
 /// 只收录明确的二进制/不可编辑格式；绝不收录源码与文本格式
 /// （.ts/.mts/.json/.svg/.map/.log/.pem/.yaml 等），否则 AI 修改这些文件
@@ -66,6 +66,23 @@ pub fn should_skip_pending_copy(path: &Path) -> bool {
     }
     let set = SKIP_EXTENSIONS_SET.get_or_init(|| SKIP_BINARY_EXTENSIONS.iter().copied().collect());
     path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            let lower = ext.to_ascii_lowercase();
+            set.contains(lower.as_str())
+        })
+        .unwrap_or(false)
+}
+
+/// 按已知大小与路径判断是否跳过内容抓取。SSH 工作区已通过远程 stat
+/// 拿到 size，无需再访问本地文件系统（与 should_skip_pending_copy 一致）。
+pub fn should_skip_pending_copy_size(size: u64, path: &str) -> bool {
+    if size > PENDING_COPY_SIZE_LIMIT {
+        return true;
+    }
+    let set = SKIP_EXTENSIONS_SET.get_or_init(|| SKIP_BINARY_EXTENSIONS.iter().copied().collect());
+    Path::new(path)
+        .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| {
             let lower = ext.to_ascii_lowercase();

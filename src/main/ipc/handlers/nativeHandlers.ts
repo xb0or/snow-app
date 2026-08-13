@@ -50,6 +50,13 @@ import { safeSend } from "../../utils/safeSend";
 const MCP_TOOL_CHUNK_CHANNEL = "mcp:call-tool:chunk";
 
 export const registerNativeHandlers = (native: NativeBridge): void => {
+  // SSH checkpoint 需要一个独立于工具调用链的远程命令通道：renderer 的
+  // checkpoint 导出 API（create/restore/list）不经过 callMcpTool，无法把
+  // onRemoteWorkspaceCommand 传入 Rust。这里注册一次全局回调，复用与
+  // callMcpTool 相同的 dispatchRemoteWorkspaceCommand（含 SFTP 会话建立）。
+  native.setCheckpointRemoteCallback?.((command) =>
+    dispatchRemoteWorkspaceCommand(command)
+  );
   ipcMain.handle("native:engine-info", () => native.engineInfo());
   ipcMain.handle(
     "settings:get-system-setting-value",

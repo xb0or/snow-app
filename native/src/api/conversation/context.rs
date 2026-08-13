@@ -31,6 +31,21 @@ pub struct PreparedConversationRequest {
     pub user_system_prompts: Vec<String>,
 }
 
+/// 子代理默认携带的队友通信能力说明，追加到每个子代理系统提示词末尾，
+/// 让子代理知道它可以用 sub-agents-listTeammates / sub-agents-sendMessage
+/// 与同一会话的队友协作。放置在所有用户配置的提示词之后，作为最终
+/// 权威规则（且不受用户是否配置 systemPrompt 影响）。
+const SUB_AGENT_COMMS_PROMPT_SECTION: &str = r#"## Teammate Communication
+
+You automatically carry two teammate communication tools scoped to the CURRENT conversation session:
+- `sub-agents-listTeammates`: query the sub-agents currently running in the same session. Returns the `conversationId`, `agentId` and `agentName` of each online teammate (you are excluded).
+- `sub-agents-sendMessage`: send a message to a teammate that is still running. The message is delivered as a Pending message and the target receives it automatically at the end of its current round; the queued text is prefixed with your identity (name + conversationId) so the recipient always knows where it came from.
+
+Rules:
+- Session isolation: only sub-agents spawned by the SAME parent conversation are visible or reachable. Teammates from other conversations are never exposed, and cross-session sends are rejected — do not try to guess other conversations' ids.
+- Only send to teammates that are still running: `sub-agents-listTeammates` returns only running teammates, and sending to a finished teammate fails with an error.
+- Use these tools to coordinate with parallel teammates (share partial findings, request input, or hand off follow-up work) when the task benefits from collaboration. Prefer concise, essential information over full context dumps."#;
+
 pub(crate) fn compose_sub_agent_system_prompts(
     builtin: &str,
     api_prompts: &[String],
@@ -39,7 +54,8 @@ pub(crate) fn compose_sub_agent_system_prompts(
     let mut seen = HashSet::new();
     let candidates = std::iter::once(builtin)
         .chain(api_prompts.iter().map(String::as_str))
-        .chain(sub_agent_prompt);
+        .chain(sub_agent_prompt)
+        .chain(std::iter::once(SUB_AGENT_COMMS_PROMPT_SECTION));
 
     candidates
         .filter_map(|prompt| {

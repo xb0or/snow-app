@@ -1004,7 +1004,9 @@ export const RightPanel = forwardRef<RightPanelRef, RightPanelProps>(
       ]
     );
 
-    useBrowserMcpCommandBridge(browserMcpCallbacks);
+    // MCP 浏览器命令桥：传入 isCollapsed，面板折叠时命令执行前先自动
+    // 展开（webview 不可见时 capturePage 返回空白，screenshot 必然失败）。
+    useBrowserMcpCommandBridge(browserMcpCallbacks, isCollapsed);
 
     const handleCloseTerminalTab = useCallback(
       (tabId: string): boolean => {

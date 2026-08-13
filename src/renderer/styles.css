@@ -1224,7 +1224,22 @@ input {
   color: var(--accent-green, #22c55e);
 }
 
+/* 优先级高于 .sub-agent-list-icon svg[stroke="currentColor"] 的灰色覆盖 */
+.sub-agent-list-item .sub-agent-list-icon svg.sub-agent-attention {
+  color: var(--warning, #f59e0b);
+}
+
+.sub-agent-list-name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
 .sub-agent-list-name {
+  flex: 1;
+  min-width: 0;
   font-size: 11.5px;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -1252,6 +1267,10 @@ input {
   line-height: 1;
   flex-shrink: 0;
 }
+.chat-item-sub-agent-count.attention {
+  background: var(--warning, #f59e0b);
+}
+
 .chat-item-content {
   display: flex;
   flex-direction: column;
@@ -2902,26 +2921,28 @@ input {
   color: var(--accent-amber-text, #b45309);
 }
 
-.explorer-connection-status {
+.explorer-connection-status-dot {
   margin-left: auto;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 400;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
 }
 
-.explorer-connection-status.connected {
-  color: var(--accent-green);
+.explorer-connection-status-dot.connected {
+  background: var(--accent-green);
 }
 
-.explorer-connection-status.reconnecting,
-.explorer-connection-status.degraded {
-  color: var(--accent-amber-text, #b45309);
+.explorer-connection-status-dot.reconnecting,
+.explorer-connection-status-dot.degraded {
+  background: var(--accent-amber-text, #b45309);
 }
 
-.explorer-connection-status.offline,
-.explorer-connection-status.auth_required,
-.explorer-connection-status.host_key_changed {
-  color: var(--accent-red);
+.explorer-connection-status-dot.offline,
+.explorer-connection-status-dot.auth_required,
+.explorer-connection-status-dot.host_key_changed {
+  background: var(--accent-red);
 }
 
 .explorer-tree {
@@ -8803,6 +8824,16 @@ input {
   color: var(--text-secondary);
 }
 
+.user-message-action-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.user-message-action-btn:disabled:hover {
+  background: transparent;
+  color: inherit;
+}
+
 .previous-messages {
   align-self: center;
   padding: 4px 10px;
@@ -9000,6 +9031,16 @@ input {
 .context-compaction-message-rollback:hover {
   background: var(--bg-hover);
   color: var(--text-secondary);
+}
+
+.context-compaction-message-rollback:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.context-compaction-message-rollback:disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .context-compaction-message-icon {
@@ -16575,6 +16616,87 @@ input {
   flex-shrink: 0;
   color: var(--accent);
   cursor: default;
+}
+
+.yolo-mode-badge {
+  color: var(--warning, #f59e0b);
+}
+
+.tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  max-width: 280px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  box-shadow: var(--island-shadow);
+  z-index: 100;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  pointer-events: none;
+  white-space: nowrap;
+  animation: tooltip-in 0.14s ease-out;
+}
+
+.tooltip-bottom {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+
+.tooltip::before,
+.tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border-style: solid;
+  border-color: transparent;
+}
+
+.tooltip::before {
+  top: 100%;
+  border-width: 6px;
+  border-top-color: var(--border-light);
+}
+
+.tooltip::after {
+  top: 100%;
+  border-width: 5px;
+  border-top-color: var(--bg-secondary);
+}
+
+.tooltip-bottom::before {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: var(--border-light);
+}
+
+.tooltip-bottom::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: var(--bg-secondary);
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 3px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .pending-messages-header {
@@ -24698,12 +24820,25 @@ input {
 }
 
 .confirm-dialog-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 16px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.1s, border-color 0.1s;
+}
+
+.confirm-dialog-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.confirm-dialog-btn:disabled:hover {
+  background: inherit;
+  color: inherit;
 }
 
 .confirm-dialog-btn.cancel {
@@ -25811,6 +25946,9 @@ input {
   flex: 0 0 auto;
   width: 26px;
   padding: 6px 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   color: inherit;
   border: none;

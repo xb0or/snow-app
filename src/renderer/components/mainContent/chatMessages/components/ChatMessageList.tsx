@@ -29,6 +29,7 @@ export const ChatMessageList = ({
     handleForkConversation,
     handleSelectConversation,
     handleRollback,
+    rollbackPreparingMessageId,
     forkedFromConversationId,
     forkMessageCount,
     pendingToolAuthorizations,
@@ -149,6 +150,7 @@ export const ChatMessageList = ({
               <CompactionMessage
                 content={message.content}
                 isStreaming={isStreaming}
+                isRollbackPreparing={rollbackPreparingMessageId === message.id}
                 onRollback={() => handleRollback(message.id)}
               />
               {message.hookExecutions && message.hookExecutions.length > 0 ? (
@@ -162,6 +164,7 @@ export const ChatMessageList = ({
           <UserMessage
             content={message.content}
             isStreaming={isStreaming}
+            isRollbackPreparing={rollbackPreparingMessageId === message.id}
             onRollback={() => handleRollback(message.id)}
             hookExecutions={message.hookExecutions}
           />

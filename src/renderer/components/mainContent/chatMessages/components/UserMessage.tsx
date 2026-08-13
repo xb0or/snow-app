@@ -26,6 +26,7 @@ export const UserMessage = memo(
   ({
     content,
     isStreaming,
+    isRollbackPreparing,
     onRollback,
     hookExecutions,
   }: UserMessageProps): React.JSX.Element => {
@@ -417,6 +418,7 @@ export const UserMessage = memo(
         <UserMessageActions
           content={content}
           isStreaming={isStreaming}
+          isRollbackPreparing={isRollbackPreparing}
           onRollback={onRollback}
         />
         {imagePreview &&

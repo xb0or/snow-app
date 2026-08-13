@@ -817,18 +817,18 @@ export const GitGraph = ({
               }}
               draggable
               onDragStart={(event) => handleRowDragStart(event, row.commit)}
-              onMouseEnter={(event) =>
-                showTooltip(row.commit, event.clientX, event.clientY)
-              }
-              onMouseMove={(event) =>
-                positionTooltip(event.clientX, event.clientY)
-              }
-              onMouseLeave={hideTooltip}
             >
               <svg
                 className="git-graph-svg"
                 width={graphWidth}
                 height={ROW_HEIGHT}
+                onMouseEnter={(event) =>
+                  showTooltip(row.commit, event.clientX, event.clientY)
+                }
+                onMouseMove={(event) =>
+                  positionTooltip(event.clientX, event.clientY)
+                }
+                onMouseLeave={hideTooltip}
               >
                 {row.topLines.map((lane) => (
                   <line
@@ -889,7 +889,6 @@ export const GitGraph = ({
                 />
               </svg>
               <div className="git-graph-info">
-                <span className="git-graph-hash">{row.commit.shortHash}</span>
                 <span className="git-graph-message" title={row.commit.message}>
                   {row.commit.message}
                 </span>

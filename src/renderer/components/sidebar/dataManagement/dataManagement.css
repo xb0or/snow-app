@@ -439,12 +439,64 @@
   outline-offset: 0;
 }
 
+.data-management-inline-field {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.data-management-inline-field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.data-management-inline-field .data-management-secondary-button {
+  flex: 0 0 auto;
+  margin-top: 0;
+  min-height: 31px;
+}
+
 .data-management-form-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-top: 13px;
+}
+
+.data-management-form-footer-start {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.data-management-stack-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 13px;
+}
+
+.data-management-stack-actions > .data-management-primary-button,
+.data-management-stack-actions > .data-management-secondary-button {
+  justify-self: start;
+  margin-top: 0;
+}
+
+.data-management-stack-actions .data-management-checkbox-row {
+  margin-top: 0;
+}
+
+.data-management-action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.data-management-action-row .data-management-primary-button,
+.data-management-action-row .data-management-secondary-button {
+  margin-top: 0;
 }
 
 .data-management-status-card {
@@ -549,9 +601,14 @@
   }
 
   .data-management-form-footer,
+  .data-management-action-row,
   .data-management-summary {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .data-management-action-row {
+    align-items: stretch;
   }
 
   .data-management-primary-button {

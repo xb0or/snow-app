@@ -194,6 +194,26 @@ if (process.platform === "darwin" && !forcedArch) {
   }
 
   console.log(`Universal native binding written to ${universalOutputPath}`);
+
+  // 清理历史遗留产物：旧单架构绑定（snow_native.darwin-*.node）与
+  // NAPI-RS 旧命名文件（index.*.node / index.js / index.d.ts）。
+  // 若不清理，electron-builder 的 files 通配会把旧 .node 一并打进安装包，
+  // index.cjs 运行时可能误选旧产物（如缺少新增导出字段），导致渲染层崩溃。
+  for (const stale of readdirSync(nativeDir)) {
+    const isStale =
+      stale === "index.js" ||
+      stale === "index.d.ts" ||
+      /^index\..*\.node$/.test(stale) ||
+      /^snow_native\.darwin-(arm64|x64)\.node$/.test(stale);
+    if (!isStale) continue;
+    try {
+      unlinkSync(join(nativeDir, stale));
+      console.log(`Removed stale native artifact: ${stale}`);
+    } catch (error) {
+      if (error?.code !== "EBUSY") throw error;
+      console.warn(`Skipped removing locked native artifact: ${stale}`);
+    }
+  }
 } else {
   // Single-architecture build (non-macOS or macOS with NATIVE_BUILD_ARCH set)
   // Non-macOS: build single architecture as before

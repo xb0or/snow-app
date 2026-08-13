@@ -6,6 +6,55 @@ use super::super::tools::McpTool;
 
 const SERVER_ID: &str = "sub-agents";
 const TOOL_NAME: &str = "activate";
+const TOOL_LIST_TEAMMATES: &str = "listTeammates";
+const TOOL_SEND_MESSAGE: &str = "sendMessage";
+
+/// 所有子代理默认携带的队友通信工具全名（查询在线队友 / 向队友发消息）。
+/// 仅子代理上下文可见：collect_all_mcp_tools（主会话工具集）不包含它们，
+/// collect_allowed_mcp_tools 无条件追加，因此无需用户配置。
+pub const SUB_AGENT_COMMS_TOOL_FULL_NAMES: &[&str] = &[
+    "sub-agents-listTeammates",
+    "sub-agents-sendMessage",
+];
+
+/// 子代理默认携带的两个通信工具定义。执行由渲染进程完成（子代理运行时状态
+/// 与 Pending 队列都在渲染进程），Rust 侧 execute 返回桥接错误。
+pub fn sub_agent_comms_tools() -> Vec<McpTool> {
+    vec![
+        McpTool {
+            server_id: SERVER_ID.to_string(),
+            name: TOOL_LIST_TEAMMATES.to_string(),
+            description: "Query the sub-agents currently online (running) in the SAME conversation session. Returns their conversationId, agentId and agentName. Only teammates of the same session are visible - sub-agents from other conversations are never exposed. Use the returned conversationId with sub-agents-sendMessage to talk to a teammate."
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        },
+        McpTool {
+            server_id: SERVER_ID.to_string(),
+            name: TOOL_SEND_MESSAGE.to_string(),
+            description: "Send a message to a teammate sub-agent that is still running in the SAME conversation session (identified via sub-agents-listTeammates). The message is delivered as a Pending message: the target receives it automatically at the end of its current round, when it is ready to continue. The queued message is prefixed with the sender's identity so the target always knows where the message came from. Messages to sub-agents of other conversations are rejected (session isolation)."
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "conversationId": {
+                        "type": "string",
+                        "description": "The target teammate sub-agent conversationId, as returned by sub-agents-listTeammates."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The message content to send. It will be queued and delivered to the target at its next round boundary."
+                    }
+                },
+                "required": ["conversationId", "message"],
+                "additionalProperties": false
+            }),
+        },
+    ]
+}
 
 pub struct SubAgentsService;
 
@@ -49,6 +98,12 @@ impl McpService for SubAgentsService {
                 Status::GenericFailure,
                 "sub-agents activate must be executed through the asynchronous Electron interaction bridge"
                     .to_string(),
+            )),
+            TOOL_LIST_TEAMMATES | TOOL_SEND_MESSAGE => Err(Error::new(
+                Status::GenericFailure,
+                format!(
+                    "sub-agents {tool_name} must be executed through the sub-agent runtime in the renderer process (session isolation and the Pending message queue live there)"
+                ),
             )),
             _ => Err(unknown_tool_error(tool_name)),
         }

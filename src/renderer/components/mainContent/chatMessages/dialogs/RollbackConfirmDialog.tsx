@@ -9,6 +9,7 @@ import {
   Eye,
   FileX2,
   ListChecks,
+  Loader2,
 } from "lucide-react";
 import type {
   CheckpointFileChange,
@@ -36,7 +37,7 @@ type RollbackConfirmDialogProps = {
   todoItems: RollbackTodoItem[];
   /** 持久化截断失败时的错误信息，显示在对话框顶部提醒用户重试。 */
   error?: string;
-  onConfirm: (mode: RollbackMode) => void;
+  onConfirm: (mode: RollbackMode) => void | Promise<void>;
   onCancel: () => void;
 };
 
@@ -65,10 +66,27 @@ export const RollbackConfirmDialog = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [isTodoExpanded, setIsTodoExpanded] = useState(false);
+  /** 确认进行中的模式：文件恢复（SSH 下经 SFTP）可能较慢，期间禁用
+   *  对话框交互并在确认按钮上显示 loading。 */
+  const [confirmingMode, setConfirmingMode] = useState<RollbackMode | null>(
+    null
+  );
 
   useEffect(() => {
     dialogRef.current?.focus();
   }, []);
+
+  const handleConfirm = async (mode: RollbackMode): Promise<void> => {
+    if (confirmingMode) {
+      return;
+    }
+    setConfirmingMode(mode);
+    try {
+      await onConfirm(mode);
+    } finally {
+      setConfirmingMode(null);
+    }
+  };
 
   const grouped = useMemo(() => {
     const added = changes.filter((c) => c.changeType === "added");
@@ -110,6 +128,9 @@ export const RollbackConfirmDialog = ({
     <div
       className="confirm-dialog-overlay"
       onKeyDown={(e) => {
+        if (confirmingMode) {
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           if (isPreviewOpen) {
@@ -120,7 +141,7 @@ export const RollbackConfirmDialog = ({
         }
         if (e.key === "Enter" && e.target === dialogRef.current) {
           e.preventDefault();
-          onConfirm("conversation-and-files");
+          void handleConfirm("conversation-and-files");
         }
       }}
     >
@@ -277,6 +298,7 @@ export const RollbackConfirmDialog = ({
             <button
               type="button"
               className="confirm-dialog-btn preview"
+              disabled={confirmingMode !== null}
               onClick={openPreview}
             >
               <Eye size={14} />
@@ -287,6 +309,7 @@ export const RollbackConfirmDialog = ({
             <button
               type="button"
               className="confirm-dialog-btn cancel"
+              disabled={confirmingMode !== null}
               onClick={onCancel}
             >
               {t("common.cancel")}
@@ -295,20 +318,34 @@ export const RollbackConfirmDialog = ({
               <button
                 type="button"
                 className="confirm-dialog-btn conversation-only"
-                onClick={() => onConfirm("conversation-only")}
+                disabled={confirmingMode !== null}
+                onClick={() => void handleConfirm("conversation-only")}
               >
-                <FileX2 size={14} />
-                {t("chat.rollbackConversationOnlyAction")}
+                {confirmingMode === "conversation-only" && (
+                  <Loader2 size={15} className="spin" />
+                )}
+                {confirmingMode !== "conversation-only" && (
+                  <FileX2 size={14} />
+                )}
+                {confirmingMode === "conversation-only"
+                  ? t("chat.rollbackInProgress")
+                  : t("chat.rollbackConversationOnlyAction")}
               </button>
             )}
             <button
               type="button"
               className="confirm-dialog-btn confirm"
-              onClick={() => onConfirm("conversation-and-files")}
+              disabled={confirmingMode !== null}
+              onClick={() => void handleConfirm("conversation-and-files")}
             >
-              {changes.length > 0
-                ? t("chat.rollbackConversationAndFilesAction")
-                : t("chat.rollbackConfirmAction")}
+              {confirmingMode === "conversation-and-files" && (
+                <Loader2 size={15} className="spin" />
+              )}
+              {confirmingMode === "conversation-and-files"
+                ? t("chat.rollbackInProgress")
+                : changes.length > 0
+                  ? t("chat.rollbackConversationAndFilesAction")
+                  : t("chat.rollbackConfirmAction")}
             </button>
           </div>
         </div>

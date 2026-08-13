@@ -1,16 +1,17 @@
-import { Check, Cloud, LockKeyhole, Save, ShieldAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Cloud, LockKeyhole, ShieldAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../../i18n";
+import { CustomSelect } from "../../common/CustomSelect";
 import type {
   DataManagementSettings,
   DataManagementSettingsPatch,
   DataManagementState,
+  DataManagementWebDavSettings,
 } from "../../../../preload";
 
 type CloudSyncTabProps = {
   state: DataManagementState | null;
   settings: DataManagementSettings | null;
-  isSaving: boolean;
   onUpdateSettings: (patch: DataManagementSettingsPatch) => Promise<void>;
   onTestConnection: () => Promise<{ weakConflictProtection: boolean }>;
   onSync: () => Promise<unknown | null>;
@@ -20,7 +21,6 @@ type CloudSyncTabProps = {
 export function CloudSyncTab({
   state,
   settings,
-  isSaving,
   onUpdateSettings,
   onTestConnection,
   onSync,
@@ -31,7 +31,6 @@ export function CloudSyncTab({
   const [endpoint, setEndpoint] = useState("");
   const [remoteRoot, setRemoteRoot] = useState("");
   const [username, setUsername] = useState("");
-  const [saved, setSaved] = useState(false);
   const [webdavPassword, setWebdavPassword] = useState("");
   const [syncMasterKey, setSyncMasterKey] = useState("");
   const [syncEnabled, setSyncEnabled] = useState(false);
@@ -41,10 +40,13 @@ export function CloudSyncTab({
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
 
+  const initializedRef = useRef(false);
+
   useEffect(() => {
-    if (!settings) {
+    if (!settings || initializedRef.current) {
       return;
     }
+    initializedRef.current = true;
     setDeviceName(settings.deviceName);
     setEndpoint(settings.webdav.endpoint);
     setRemoteRoot(settings.webdav.remoteRoot);
@@ -55,39 +57,80 @@ export function CloudSyncTab({
     setAllowInsecureHttp(settings.webdav.allowInsecureHttp);
   }, [settings]);
 
-  const handleSave = async (): Promise<void> => {
-    setBusy(true);
+  const persistWebdav = (patch: Partial<DataManagementWebDavSettings>): void => {
+    void onUpdateSettings({ webdav: patch }).catch(() => {
+      // The shared panel displays the error from useDataManagement.
+    });
+  };
+
+  const persistDeviceName = (): void => {
+    void onUpdateSettings({ deviceName }).catch(() => {
+      // The shared panel displays the error from useDataManagement.
+    });
+  };
+
+  const commitCredential = async (
+    kind: "webdav-password" | "sync-master-key",
+    value: string,
+    clear: () => void
+  ): Promise<void> => {
+    if (!value.trim()) return;
+    clear();
     try {
-      if (webdavPassword.trim()) {
-        await window.snow.setDataManagementCredential({ kind: "webdav-password", value: webdavPassword });
-        setWebdavPassword("");
-      }
-      if (syncMasterKey.trim()) {
-        await window.snow.setDataManagementCredential({ kind: "sync-master-key", value: syncMasterKey });
-        setSyncMasterKey("");
-      }
-      await onUpdateSettings({
-        deviceName,
-        webdav: { endpoint, remoteRoot, username, syncEnabled, syncIntervalMinutes, syncMode, allowInsecureHttp },
-      });
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 2200);
-    } finally {
-      setBusy(false);
+      await window.snow.setDataManagementCredential({ kind, value });
+    } catch {
+      // The shared panel displays the error from useDataManagement.
     }
+  };
+
+  const changeSyncMode = (value: string): void => {
+    const next = value as "config" | "mirror";
+    setSyncMode(next);
+    persistWebdav({ syncMode: next });
+  };
+
+  const changeSyncInterval = (value: string): void => {
+    const next = Number(value) as 0 | 15 | 30 | 60;
+    setSyncIntervalMinutes(next);
+    persistWebdav({ syncIntervalMinutes: next });
+  };
+
+  const toggleSyncEnabled = (checked: boolean): void => {
+    setSyncEnabled(checked);
+    persistWebdav({ syncEnabled: checked });
+  };
+
+  const toggleAllowInsecureHttp = (checked: boolean): void => {
+    setAllowInsecureHttp(checked);
+    persistWebdav({ allowInsecureHttp: checked });
   };
 
   const testConnection = async (): Promise<void> => {
     setBusy(true);
     try {
       const result = await onTestConnection();
-      setStatusMessage(result.weakConflictProtection ? "Connected; server has weak ETag protection" : "WebDAV connection is ready");
+      setStatusMessage(
+        result.weakConflictProtection
+          ? t("settings.dataManagementConnectionWeakEtag", {
+              defaultValue: "Connected; server has weak ETag protection",
+            })
+          : t("settings.dataManagementConnectionReady", {
+              defaultValue: "WebDAV connection is ready",
+            })
+      );
     } finally { setBusy(false); }
   };
 
   const runSync = async (): Promise<void> => {
     setBusy(true);
-    try { await onSync(); setStatusMessage("Sync completed"); } finally { setBusy(false); }
+    try {
+      await onSync();
+      setStatusMessage(
+        t("settings.dataManagementSyncCompleted", {
+          defaultValue: "Sync completed",
+        })
+      );
+    } finally { setBusy(false); }
   };
 
   const safeStorageReady = state?.safeStorageAvailable === true;
@@ -111,7 +154,11 @@ export function CloudSyncTab({
             })}
           </p>
         </div>
-        <span className="data-management-phase-badge">Encrypted ETag sync</span>
+        <span className="data-management-phase-badge">
+          {t("settings.dataManagementEncryptedEtagSync", {
+            defaultValue: "Encrypted ETag sync",
+          })}
+        </span>
       </div>
 
       <section className="data-management-card">
@@ -139,6 +186,7 @@ export function CloudSyncTab({
             value={deviceName}
             maxLength={64}
             onChange={(event) => setDeviceName(event.target.value)}
+            onBlur={persistDeviceName}
             placeholder={t("settings.dataManagementDeviceNamePlaceholder", {
               defaultValue: "Snow App",
             })}
@@ -170,6 +218,7 @@ export function CloudSyncTab({
             <input
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
+              onBlur={() => persistWebdav({ endpoint })}
               placeholder="https://dav.example.com/remote.php/dav/files/user"
               inputMode="url"
             />
@@ -183,6 +232,7 @@ export function CloudSyncTab({
             <input
               value={remoteRoot}
               onChange={(event) => setRemoteRoot(event.target.value)}
+              onBlur={() => persistWebdav({ remoteRoot })}
               placeholder="snow-app"
             />
           </label>
@@ -195,56 +245,68 @@ export function CloudSyncTab({
             <input
               value={username}
               onChange={(event) => setUsername(event.target.value)}
+              onBlur={() => persistWebdav({ username })}
               autoComplete="username"
             />
           </label>
           <label>
-            <span>WebDAV password</span>
-            <input type="password" value={webdavPassword} onChange={(event) => setWebdavPassword(event.target.value)} autoComplete="new-password" placeholder={state?.credentialStatus.webdavPasswordConfigured ? "Configured" : "Required"} />
+            <span>{t("settings.dataManagementWebdavPassword", { defaultValue: "WebDAV password" })}</span>
+            <input type="password" value={webdavPassword} onChange={(event) => setWebdavPassword(event.target.value)} onBlur={() => void commitCredential("webdav-password", webdavPassword, () => setWebdavPassword(""))} autoComplete="new-password" placeholder={state?.credentialStatus.webdavPasswordConfigured ? t("settings.dataManagementConfigured", { defaultValue: "Configured" }) : t("settings.dataManagementRequired", { defaultValue: "Required" })} />
           </label>
           <label>
-            <span>Sync encryption password</span>
-            <input type="password" value={syncMasterKey} onChange={(event) => setSyncMasterKey(event.target.value)} autoComplete="new-password" placeholder={state?.credentialStatus.syncMasterKeyConfigured ? "Configured" : "Required"} />
+            <span>{t("settings.dataManagementSyncEncryptionPassword", { defaultValue: "Sync encryption password" })}</span>
+            <input type="password" value={syncMasterKey} onChange={(event) => setSyncMasterKey(event.target.value)} onBlur={() => void commitCredential("sync-master-key", syncMasterKey, () => setSyncMasterKey(""))} autoComplete="new-password" placeholder={state?.credentialStatus.syncMasterKeyConfigured ? t("settings.dataManagementConfigured", { defaultValue: "Configured" }) : t("settings.dataManagementRequired", { defaultValue: "Required" })} />
           </label>
           <label>
-            <span>Sync mode</span>
-            <select value={syncMode} onChange={(event) => setSyncMode(event.target.value as "config" | "mirror")}>
-              <option value="config">Configuration sync</option>
-              <option value="mirror">Full database mirror (restart)</option>
-            </select>
+            <span>{t("settings.dataManagementSyncMode", { defaultValue: "Sync mode" })}</span>
+            <CustomSelect
+              value={syncMode}
+              options={[
+                { value: "config", label: t("settings.dataManagementConfigurationSync", { defaultValue: "Configuration sync" }) },
+                { value: "mirror", label: t("settings.dataManagementFullMirror", { defaultValue: "Full database mirror (restart)" }) },
+              ]}
+              onChange={changeSyncMode}
+            />
           </label>
           <label>
-            <span>Automatic sync</span>
-            <select value={syncIntervalMinutes} onChange={(event) => setSyncIntervalMinutes(Number(event.target.value) as 0 | 15 | 30 | 60)}>
-              <option value={0}>Manual only</option>
-              <option value={15}>Every 15 minutes</option>
-              <option value={30}>Every 30 minutes</option>
-              <option value={60}>Every hour</option>
-            </select>
+            <span>{t("settings.dataManagementAutomaticSync", { defaultValue: "Automatic sync" })}</span>
+            <CustomSelect
+              value={String(syncIntervalMinutes)}
+              options={[
+                { value: "0", label: t("settings.dataManagementManualOnly", { defaultValue: "Manual only" }) },
+                { value: "15", label: t("settings.dataManagementEvery15Minutes", { defaultValue: "Every 15 minutes" }) },
+                { value: "30", label: t("settings.dataManagementEvery30Minutes", { defaultValue: "Every 30 minutes" }) },
+                { value: "60", label: t("settings.dataManagementEveryHour", { defaultValue: "Every hour" }) },
+              ]}
+              onChange={changeSyncInterval}
+            />
           </label>
         </div>
-        <label className="data-management-checkbox-row data-management-risk-option">
-          <input type="checkbox" checked={allowInsecureHttp} onChange={(event) => setAllowInsecureHttp(event.target.checked)} />
-          <span>Allow insecure HTTP (high risk; HTTPS remains the default)</span>
-        </label>
+        <div className="data-management-checkbox-row data-management-risk-option">
+          <label className="toggle-switch">
+            <input type="checkbox" hidden checked={allowInsecureHttp} onChange={(event) => toggleAllowInsecureHttp(event.target.checked)} />
+            <span className="toggle-slider" />
+          </label>
+          <span>{t("settings.dataManagementAllowInsecureHttp", { defaultValue: "Allow insecure HTTP (high risk; HTTPS remains the default)" })}</span>
+        </div>
         <div className="data-management-form-footer">
           <span className="data-management-muted-note">
-            {statusMessage || "Remote objects are encrypted before upload; passwords never leave the main process."}
+            {statusMessage ||
+              t("settings.dataManagementRemoteEncryptedNote", {
+                defaultValue: "Remote objects are encrypted before upload; passwords never leave the main process.",
+              })}
           </span>
-          <label className="data-management-checkbox-row"><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} /><span>Enable automatic sync</span></label>
-          <button className="data-management-secondary-button" disabled={busy || !endpoint.trim()} type="button" onClick={() => void testConnection()}>Test connection</button>
-          <button className="data-management-secondary-button" disabled={busy || !endpoint.trim()} type="button" onClick={() => void runSync()}>Sync now</button>
-          <button
-            className="data-management-primary-button"
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={isSaving || busy || !deviceName.trim()}
-          >
-            {saved ? <Check size={14} aria-hidden="true" /> : <Save size={14} aria-hidden="true" />}
-            {saved
-              ? t("settings.dataManagementSaved", { defaultValue: "Saved" })
-              : t("settings.dataManagementSave", { defaultValue: "Save" })}
-          </button>
+          <div className="data-management-checkbox-row">
+            <label className="toggle-switch">
+              <input type="checkbox" hidden checked={syncEnabled} onChange={(event) => toggleSyncEnabled(event.target.checked)} />
+              <span className="toggle-slider" />
+            </label>
+            <span>{t("settings.dataManagementEnableAutomaticSync", { defaultValue: "Enable automatic sync" })}</span>
+          </div>
+        </div>
+        <div className="data-management-action-row">
+          <button className="data-management-secondary-button" disabled={busy || !endpoint.trim()} type="button" onClick={() => void testConnection()}>{t("settings.dataManagementTestConnection", { defaultValue: "Test connection" })}</button>
+          <button className="data-management-secondary-button" disabled={busy || !endpoint.trim()} type="button" onClick={() => void runSync()}>{t("settings.dataManagementSyncNow", { defaultValue: "Sync now" })}</button>
         </div>
       </section>
 
@@ -284,12 +346,18 @@ export function CloudSyncTab({
         <section className="data-management-card data-management-status-card is-warning">
           <ShieldAlert size={16} aria-hidden="true" />
           <div>
-            <strong>Sync conflict needs a choice</strong>
-            <span>Remote revision {state.sync.conflict.remoteRevision} from {state.sync.conflict.remoteDeviceName}; local data was kept.</span>
+            <strong>{t("settings.dataManagementConflictTitle", { defaultValue: "Sync conflict needs a choice" })}</strong>
+            <span>{t("settings.dataManagementConflictInfo", {
+              values: {
+                revision: state.sync.conflict.remoteRevision,
+                device: state.sync.conflict.remoteDeviceName,
+              },
+              defaultValue: "Remote revision {{revision}} from {{device}}; local data was kept.",
+            })}</span>
             <div className="data-management-form-footer">
-              <button className="data-management-secondary-button" disabled={busy} onClick={() => void onResolveConflict("local")} type="button">Keep local and upload</button>
-              <button className="data-management-secondary-button" disabled={busy} onClick={() => void onResolveConflict("remote")} type="button">Use remote</button>
-              <button className="data-management-secondary-button" disabled={busy} onClick={() => void onResolveConflict("keep-both")} type="button">Keep both</button>
+              <button className="data-management-secondary-button" disabled={busy} onClick={() => void onResolveConflict("local")} type="button">{t("settings.dataManagementKeepLocal", { defaultValue: "Keep local and upload" })}</button>
+              <button className="data-management-secondary-button" disabled={busy} onClick={() => void onResolveConflict("remote")} type="button">{t("settings.dataManagementUseRemote", { defaultValue: "Use remote" })}</button>
+              <button className="data-management-secondary-button" disabled={busy} onClick={() => void onResolveConflict("keep-both")} type="button">{t("settings.dataManagementKeepBoth", { defaultValue: "Keep both" })}</button>
             </div>
           </div>
         </section>
@@ -298,9 +366,9 @@ export function CloudSyncTab({
       <section className="data-management-card data-management-status-card">
         <Cloud size={16} aria-hidden="true" />
         <div>
-          <strong>Sync status: {state?.sync.status ?? "idle"}</strong>
-          <span>{state?.sync.lastSuccessAt ? `Last successful sync: ${new Date(state.sync.lastSuccessAt).toLocaleString()}` : "No successful sync recorded yet."}</span>
-          {state?.sync.lastError && <span className="data-management-error-inline">Latest error: {state.sync.lastError}</span>}
+          <strong>{t("settings.dataManagementSyncStatusLabel", { values: { status: state?.sync.status ?? "idle" }, defaultValue: "Sync status: {{status}}" })}</strong>
+          <span>{state?.sync.lastSuccessAt ? t("settings.dataManagementLastSyncAt", { values: { time: new Date(state.sync.lastSuccessAt).toLocaleString() }, defaultValue: "Last successful sync: {{time}}" }) : t("settings.dataManagementNoSyncYet", { defaultValue: "No successful sync recorded yet." })}</span>
+          {state?.sync.lastError && <span className="data-management-error-inline">{t("settings.dataManagementLatestError", { values: { error: state.sync.lastError }, defaultValue: "Latest error: {{error}}" })}</span>}
         </div>
       </section>
     </div>

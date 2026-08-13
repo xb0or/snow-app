@@ -814,6 +814,9 @@ export const loadNativeBridge = (): NativeBridge => {
         Promise.reject(
           new Error("Rust native bridge is required to write interactive stdin")
         ),
+      setCheckpointRemoteCallback: () => {
+        // Fallback: no Rust bridge means no SSH checkpoint support.
+      },
       callMcpTool: () =>
         Promise.reject(
           new Error("Rust native bridge is required to call MCP tools")

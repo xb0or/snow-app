@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { Check, Copy, Undo2 } from "lucide-react";
+import { Check, Copy, Loader2, Undo2 } from "lucide-react";
 type UserMessageActionsProps = {
   content: string;
   isStreaming: boolean;
+  isRollbackPreparing?: boolean;
   onRollback: () => void;
 };
 
 export const UserMessageActions = ({
   content,
   isStreaming,
+  isRollbackPreparing,
   onRollback,
 }: UserMessageActionsProps): React.JSX.Element => {
   const [copied, setCopied] = useState(false);
@@ -39,9 +41,19 @@ export const UserMessageActions = ({
           className="user-message-action-btn"
           type="button"
           aria-label="Rollback to this message"
+          title={
+            isRollbackPreparing
+              ? "Checking file changes…"
+              : "Rollback to this message"
+          }
+          disabled={isRollbackPreparing}
           onClick={onRollback}
         >
-          <Undo2 size={15} strokeWidth={1.8} />
+          {isRollbackPreparing ? (
+            <Loader2 size={15} strokeWidth={1.8} className="spin" />
+          ) : (
+            <Undo2 size={15} strokeWidth={1.8} />
+          )}
         </button>
       ) : null}
     </div>
