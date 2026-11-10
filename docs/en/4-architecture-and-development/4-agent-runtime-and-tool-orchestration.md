@@ -848,6 +848,15 @@ The kernel ports upstream `acp-kernel` 0.0.101 module by module; the submodules 
 and can be diffed constant-by-constant with `scripts/verify-kernel-texts.mjs` (all 53
 constants/arrays must be byte-identical). Both scripts read the `ACP_KERNEL_DIST`
 environment variable (defaulting to a local unpacked `acp-kernel/dist/index.js`).
+
+The pure-logic regression baseline is the read-only napi self-test
+`context_kernel_self_test()` plus `scripts/verify-kernel-behavior.mjs`: the former returns
+the observed output of refs / segment / viable / boundaries / protected / recommend /
+nudge / output-steering / content-store / ccr / absorb / crush / image-compress /
+surface-config / parse-compress-input / cache-report primitives, the latter diffs it
+against the upstream-observed values. After an upstream bump, re-run the upstream probes,
+update the baseline, then `npm run build:rust && node scripts/verify-kernel-behavior.mjs`.
+
 These texts land in prefix-cache-sensitive positions (system-prompt tail, tool results,
 placeholders); changing one character busts every session's cache, so they must not be
 hand-edited — regenerate and re-verify after an upstream bump instead.

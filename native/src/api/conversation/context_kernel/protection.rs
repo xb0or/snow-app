@@ -561,7 +561,7 @@ pub fn format_ranges(
             }
             if entry.protected_tokens > 0 && entry.compressible_tokens > 0 {
                 return format!(
-                    "  {}–{}  {} msgs  {} [{} compressible | {} protected: {}]{} {}",
+                    "  {}–{}  {} msgs  {} [{} compressible | {} protected: {}]{}{}",
                     entry.start_ref,
                     entry.end_ref,
                     entry.count,
@@ -574,7 +574,7 @@ pub fn format_ranges(
                 );
             }
             format!(
-                "  {}–{}  {} msgs  {} [tool {}% | text {}%] {} {}",
+                "  {}–{}  {} msgs  {} [tool {}% | text {}%]{}{}",
                 entry.start_ref,
                 entry.end_ref,
                 entry.count,
@@ -593,14 +593,46 @@ pub fn format_ranges(
     )
 }
 
+/// 用户消息数后缀。**前导空格包含在内**（与上游一致：模板直接拼接，不再补空格）。
 fn user_note(count: usize) -> String {
-    if count == 0 {
-        String::new()
-    } else if count > 1 {
-        format!("· {count} user msgs")
-    } else {
-        format!("· {count} user msg")
+    match count {
+        0 => String::new(),
+        1 => " · 1 user msg".to_string(),
+        other => format!(" · {other} user msgs"),
     }
+}
+
+/// 上下文构成行（上游 `formatBreakdown`）。
+pub fn format_breakdown(
+    tool: i64,
+    text: i64,
+    summaries: i64,
+    code: i64,
+    system: i64,
+    growth: i64,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if system > 0 {
+        parts.push(format!("{} system", format_k(system)));
+    }
+    if tool > 0 {
+        parts.push(format!("{} tool", format_k(tool)));
+    }
+    if summaries > 0 {
+        parts.push(format!("{} summaries", format_k(summaries)));
+    }
+    if code > 0 {
+        parts.push(format!("{} code", format_k(code)));
+    }
+    if text > 0 {
+        parts.push(format!("{} text", format_k(text)));
+    }
+    let growth = if growth > 0 {
+        format!("\n+{} since last nudge", format_k(growth))
+    } else {
+        String::new()
+    };
+    format!("Context breakdown: {}{growth}", parts.join(" | "))
 }
 
 /// 活动块地图（上游 `formatBlockMap`）。
@@ -692,6 +724,17 @@ pub struct NudgeDecision {
     pub tier: Option<u8>,
     /// tier ≥ 2 时需要蒸馏的目标块（真实块，用于渲染目标清单）。
     pub tier_targets: Vec<KernelBlock>,
+    /// `formatBreakdown` 渲染好的上下文构成行。
+    pub breakdown: String,
+}
+
+/// 上游 `compact`：只丢掉**前导**空串，再按换行拼接。
+fn compact_join(parts: Vec<String>) -> String {
+    let mut items = parts;
+    while items.first().is_some_and(|entry| entry.is_empty()) {
+        items.remove(0);
+    }
+    items.join("\n")
 }
 
 fn efficiency_note() -> String {
@@ -745,6 +788,8 @@ pub fn render_nudge_text(decision: &NudgeDecision) -> RenderedNudge {
         let parts = vec![
             efficiency_note(),
             String::new(),
+            decision.breakdown.clone(),
+            String::new(),
             trigger_line,
             block_list,
             format!(
@@ -761,43 +806,51 @@ pub fn render_nudge_text(decision: &NudgeDecision) -> RenderedNudge {
         ];
         return RenderedNudge {
             voice,
-            text: parts.join("\n"),
+            text: compact_join(parts),
         };
     }
     if decision.emergency {
-        return RenderedNudge {
-            voice: NudgeVoice::Emergency,
-            text: [
-                emergency_header(),
-                String::new(),
-                texts::HOW_TO_COMPRESS_RULES.to_string(),
-                String::new(),
-                "{ \"topic\": \"...\", \"content\": [{ \"startId\": \"<ID>\", \"endId\": \"<ID>\", \"summary\": \"...\" }] }".to_string(),
-                "Only use IDs from visible messages above. Compress older work first.".to_string(),
-                String::new(),
-                ranges_str,
-                if block_map_str.is_empty() { String::new() } else { format!("\n{block_map_str}") },
-            ]
-            .join("\n"),
-        };
-    }
-    RenderedNudge {
-        voice: NudgeVoice::Gentle,
-        text: [
-            efficiency_note(),
+        let mut parts = vec![
+            emergency_header(),
+            String::new(),
+            decision.breakdown.clone(),
             String::new(),
             texts::HOW_TO_COMPRESS_RULES.to_string(),
             String::new(),
-            ranges_str,
-            if block_map_str.is_empty() {
-                String::new()
-            } else {
-                format!("\n{block_map_str}")
-            },
+            "{ \"topic\": \"...\", \"content\": [{ \"startId\": \"<ID>\", \"endId\": \"<ID>\", \"summary\": \"...\" }] }".to_string(),
+            "Only use IDs from visible messages above. Compress older work first.".to_string(),
             String::new(),
-            "💡 If you compress, fold the ranges you keep in ONE call — pass multiple content entries (`content: [{...}, {...}]`) or ONE plain string holding every range, each block starting with its 'mNNNNN–mNNNNN topic' header line (most robust through lossy gateways). Ranges the task still needs can wait — they reappear in later nudges.".to_string(),
-        ]
-        .join("\n"),
+            ranges_str,
+        ];
+        if !block_map_str.is_empty() {
+            parts.push(String::new());
+            parts.push(block_map_str);
+        }
+        return RenderedNudge {
+            voice: NudgeVoice::Emergency,
+            text: compact_join(parts),
+        };
+    }
+    let mut parts = vec![
+        efficiency_note(),
+        String::new(),
+        decision.breakdown.clone(),
+        String::new(),
+        texts::HOW_TO_COMPRESS_RULES.to_string(),
+        String::new(),
+        ranges_str,
+    ];
+    if !block_map_str.is_empty() {
+        parts.push(String::new());
+        parts.push(block_map_str);
+    }
+    parts.push(String::new());
+    parts.push(
+        "💡 If you compress, fold the ranges you keep in ONE call — pass multiple content entries (`content: [{...}, {...}]`) or ONE plain string holding every range, each block starting with its 'mNNNNN–mNNNNN topic' header line (most robust through lossy gateways). Ranges the task still needs can wait — they reappear in later nudges.".to_string(),
+    );
+    RenderedNudge {
+        voice: NudgeVoice::Gentle,
+        text: compact_join(parts),
     }
 }
 
