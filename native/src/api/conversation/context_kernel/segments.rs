@@ -74,6 +74,18 @@ pub trait RangeTokens {
     fn tokens(&self) -> i64;
 }
 
+impl RangeTokens for i64 {
+    fn tokens(&self) -> i64 {
+        *self
+    }
+}
+
+impl RangeTokens for super::protection::CompressibleRange {
+    fn tokens(&self) -> i64 {
+        self.tokens
+    }
+}
+
 // ---------------------------------------------------------------------------
 // truncate.ts
 // ---------------------------------------------------------------------------

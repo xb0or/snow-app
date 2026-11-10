@@ -846,6 +846,14 @@ flowchart TD
 `texts.rs` 由 `scripts/gen-kernel-texts.mjs` 从上游 dist 直接导出，可用
 `scripts/verify-kernel-texts.mjs` 逐条比对（53 个常量 / 数组必须字节一致）。两个脚本
 读 `ACP_KERNEL_DIST` 环境变量（默认指向本机解包的 `acp-kernel/dist/index.js`）。
+
+纯逻辑侧的回归基线是 napi 只读自检 `context_kernel_self_test()` 与
+`scripts/verify-kernel-behavior.mjs`：前者返回 refs / segment / viable / boundaries /
+protected / recommend / nudge / output-steering / content-store / ccr / absorb / crush /
+image-compress / surface-config / parse-compress-input / cache-report 的实测输出，后者把
+它与上游实测结果逐条比对。上游升级后重跑上游探针、更新基线、再执行
+`npm run build:rust && node scripts/verify-kernel-behavior.mjs`。
+
 这些文本进入前缀缓存敏感位置（系统提示词尾部、工具结果、占位符），改一个字符就会
 击穿所有会话的缓存，因此禁止手改；上游升级后重新生成并重跑校验即可。
 

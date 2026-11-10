@@ -32,6 +32,11 @@ use crate::storage::services::chat_conversations::{
 //
 // 每个子模块对应上游一个 `.ts` 模块，保持同名语义与字节稳定文本；子模块是纯函数，
 // 通过 `super::` 访问本文件的类型。
+pub mod absorb;
+pub mod analytics;
+pub mod content;
+pub mod image;
+pub mod porting;
 pub mod protection;
 pub mod refs;
 pub mod rendering;
@@ -168,9 +173,13 @@ impl Default for NudgeConfig {
 }
 
 /// 危急裁剪（上游 `config.truncate`）。
+///
+/// Snow 侧多一个 `enabled` 开关（默认 **关**）：上游把它绑在窗口危急判定上，但
+/// 「默认关闭 = 行为不变」是本移植的硬约束，所以危险裁剪必须是显式开启的能力。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TruncateConfig {
+    pub enabled: bool,
     pub threshold: f64,
     pub terminal_escape_after: u32,
 }
@@ -178,6 +187,7 @@ pub struct TruncateConfig {
 impl Default for TruncateConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
             threshold: 0.95,
             terminal_escape_after: 3,
         }
@@ -1873,6 +1883,67 @@ pub fn apply_outgoing_view(
         changed = true;
         // 占位符会显著缩小出站体积，nudge 判断必须用压缩后的估算。
         tokens = folded.iter().map(estimate_message_tokens).sum();
+    }
+    // crush：类型化确定性压缩（视图专用、每轮字节一致）。默认关闭。
+    if cfg.crush.enabled {
+        let (crushed, crushed_count, _) = absorb::apply_crush_to_messages(
+            &folded,
+            true,
+            cfg.crush.min_reduction,
+            |text: &str| crate::api::token_counter::count_tokens(text) as i64,
+        );
+        if crushed_count > 0 {
+            folded = crushed;
+            tokens = folded.iter().map(estimate_message_tokens).sum();
+        }
+    }
+    // absorb：给够大的工具结果追加强制吸收提示（每轮视图专用，绝不持久化）。默认关闭。
+    if cfg.absorb.enabled {
+        let refs: Vec<String> = HistoryView::build(folded.clone())
+            .refs
+            .iter()
+            .map(|item| item.id.clone())
+            .collect();
+        let prompted = absorb::append_absorb_prompts(
+            &folded,
+            true,
+            cfg.absorb.min_tool_tokens,
+            &cfg.absorb.exclude_tools,
+            &cfg.absorb.tool_name,
+            estimate_message_tokens,
+            |index| refs.get(index).cloned().unwrap_or_default(),
+        );
+        if prompted.prompted_count > 0 {
+            folded = prompted.messages;
+            tokens = folded.iter().map(estimate_message_tokens).sum();
+        }
+    }
+    // 危急裁剪：窗口真的快满了才动，且必须显式开启。默认关闭。
+    if cfg.truncate.enabled && cfg.truncate.threshold > 0.0 {
+        let effective = tokens.max(observed_tokens.unwrap_or(0));
+        let limit = if cfg.model_context_limit > 0 {
+            cfg.model_context_limit
+        } else {
+            200_000
+        };
+        if (effective as f64) >= (limit as f64) * cfg.truncate.threshold {
+            let result = content::truncate_large_tool_outputs(
+                &folded,
+                effective,
+                cfg.truncate.threshold,
+                limit,
+                &content::TruncateOptions::default(),
+                |text: &str| crate::api::token_counter::count_tokens(text) as i64,
+            );
+            if result.truncated_count > 0 {
+                eprintln!(
+                    "context kernel: emergency truncation removed ~{} tokens from {} tool result(s)",
+                    result.saved_tokens, result.truncated_count
+                );
+                folded = result.messages;
+                tokens = folded.iter().map(estimate_message_tokens).sum();
+            }
+        }
     }
     let threshold = threshold_tokens.filter(|value| *value > 0);
     // 子代理没有内核工具（不在其工具白名单内），nudge 只会变成噪声；只折叠可用块。
