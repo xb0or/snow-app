@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: ""
-        required: true
+        description: "Release tag to publish (e.g. v1.2.3). Leave EMPTY for a build-only run that only uploads installers as workflow artifacts."
+        required: false
         type: string
       release_notes:
-        description: ""
+        description: "Release notes body (only used when publishing)."
         required: false
         type: string
 
@@ -116,6 +116,9 @@ jobs:
 
   publish:
     needs: [build]
+    # 打 tag 推送 → 发布 Release；手动 dispatch 必须显式填 tag 才发布。
+    # 不填 tag 的 dispatch 只跑 build 作业，安装包留在 workflow artifacts 里。
+    if: ${{ github.event_name == 'push' || inputs.tag != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
