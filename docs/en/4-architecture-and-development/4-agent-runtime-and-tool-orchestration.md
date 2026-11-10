@@ -765,14 +765,20 @@ The full transcript still goes to `chat_messages`, the UI is unchanged, and only
   stable across rollback truncation, forks and retries; a block whose messages vanished is
   dropped automatically.
 - Outbound view: a **byte-stable** summary message is inserted at the block's first position
-  and the covered messages are removed. The first non-system message is pinned forever and
-  the most recent 6 messages are protected.
+  and the covered messages are removed. The first non-system message is pinned forever, the
+  most recent 6 messages are protected, media-bearing messages and context-kernel tool
+  messages are never folded, and ranges that split a tool call from its result are rejected.
+- Layered folding: a plain range creates a tier-1 block; a range that FULLY CONTAINS existing
+  blocks merges them into a higher tier (2, then 3 max). The parent records `children` and the
+  children stay marked `folded_into` so they stop rendering on their own; `decompress` on the
+  parent reactivates them at their original tier. Partially overlapping ranges are rejected.
 - State: `context_kernel_state(conversation_id, sub_agent_id, kernel_version, state_json,
 store_json, updated_at)`, scoped by conversation + sub-agent and cascade-deleted with the
   conversation.
 - Threshold: reuses `autoCompressThreshold` (falling back to 60% of `maxContextTokens`).
-  When the estimated tokens or the latest real usage reach it, a nudge is appended to the
-  outbound tail; the nudge is never persisted.
+  Token estimates use a real tokenizer (o200k_base) and the decision takes the larger of the
+  estimate and the latest real usage; when it trips, a nudge (with the current highest tier)
+  is appended to the outbound tail and never persisted.
 - Tools: `context-kernel-acp_status` / `compress` / `decompress` / `retrieve` /
   `search_context`, all read-only (no approval). `call_mcp_tool` injects the current
   conversation, so the model cannot operate on another one. `compress` additionally runs the

@@ -184,6 +184,10 @@ export type ReplyPredictionResult = {
 export type ContextKernelBlockStatus = {
   blockId: string;
   title: string;
+  /** 1 = 原文摘要；2/3 = 由下层块蒸馏而来。 */
+  tier: number;
+  /** 被本块合并的子块 id（decompress 会按原层级还原）。 */
+  children: string[];
   coveredMessages: number;
   summaryTokens: number;
   createdAt: string;
@@ -205,6 +209,9 @@ export type ContextKernelStatus = {
   compressNeeded: boolean;
   compressedMessages: number;
   activeBlocks: number;
+  /** 当前最高折叠层级（0 = 无块；上限 `maxTier`）。 */
+  highestTier: number;
+  maxTier: number;
   storedEntries: number;
   storedChars: number;
   blocks: ContextKernelBlockStatus[];

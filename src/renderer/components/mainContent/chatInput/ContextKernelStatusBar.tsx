@@ -104,6 +104,18 @@ export const ContextKernelStatusBar = ({
             .replace("{used}", formatTokens(used))
             .replace("{threshold}", formatTokens(threshold))}
         </span>
+        {status.highestTier > 0 ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>
+              {t("chat.contextKernelTier", {
+                defaultValue: "层级 {tier}/{max}",
+              })
+                .replace("{tier}", String(status.highestTier))
+                .replace("{max}", String(status.maxTier))}
+            </span>
+          </>
+        ) : null}
         {status.storedEntries > 0 ? (
           <>
             <span aria-hidden="true">·</span>
@@ -157,6 +169,7 @@ export const ContextKernelStatusBar = ({
             >
               <span style={{ color: "var(--text-link)", flexShrink: 0 }}>
                 {block.blockId}
+                {block.tier > 1 ? ` T${block.tier}` : ""}
               </span>
               <span
                 style={{
@@ -175,6 +188,11 @@ export const ContextKernelStatusBar = ({
                 })
                   .replace("{messages}", String(block.coveredMessages))
                   .replace("{tokens}", formatTokens(block.summaryTokens))}
+                {block.children.length > 0
+                  ? ` · ${t("chat.contextKernelMerged", {
+                      defaultValue: "合并 {count} 块",
+                    }).replace("{count}", String(block.children.length))}`
+                  : ""}
               </span>
             </div>
           ))}
