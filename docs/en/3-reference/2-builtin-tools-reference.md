@@ -546,13 +546,13 @@ with it off, both the tools and the folding are absent and the request payload i
 These tools change only the outbound message view — stored history, the UI and the
 `chat_messages` table keep every message.
 
-| Tool name                       | Purpose                                                                                                                      | Key parameters                                                       |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `context-kernel-acp_status`     | Report outbound token estimate, threshold, whether compression is needed, active blocks, and stable refs for recent messages | `refLimit` (4-200, default 40)                                       |
-| `context-kernel-compress`       | Cover a contiguous run of older messages with a self-contained model-written summary, creating a block                       | `from`, `to` (message refs, required), `summary` (required), `title` |
-| `context-kernel-decompress`     | Drop a block so its original messages become visible to the model again                                                      | `blockId` (e.g. `b1`)                                                |
-| `context-kernel-retrieve`       | Read the original tool output behind a `[context-kernel:stored ...]` placeholder                                             | `ref` (e.g. `cr1a2b3c4d5e6f7890`)                                    |
-| `context-kernel-search_context` | Keyword search across the full transcript (including messages hidden behind blocks) and block summaries                      | `query` (required), `limit` (1-30, default 8)                        |
+| Tool name                       | Purpose                                                                                                                                                              | Key parameters                                                       |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `context-kernel-acp_status`     | Report outbound token estimate, threshold, whether compression is needed, active blocks, and stable refs for recent messages                                         | `refLimit` (4-200, default 40)                                       |
+| `context-kernel-compress`       | Cover a contiguous run of older messages with a self-contained model-written summary (tier 1); a range that fully contains existing blocks merges them into tier 2/3 | `from`, `to` (message refs, required), `summary` (required), `title` |
+| `context-kernel-decompress`     | Drop a block so its original messages become visible to the model again                                                                                              | `blockId` (e.g. `b1`)                                                |
+| `context-kernel-retrieve`       | Read the original tool output behind a `[context-kernel:stored ...]` placeholder                                                                                     | `ref` (e.g. `cr1a2b3c4d5e6f7890`)                                    |
+| `context-kernel-search_context` | Keyword search across the full transcript (including messages hidden behind blocks) and block summaries                                                              | `query` (required), `limit` (1-30, default 8)                        |
 
 Rules:
 
@@ -562,6 +562,16 @@ Rules:
 - The first user message is pinned forever, the most recent 6 messages are protected, and a
   block must cover at least 2 messages. System messages, already-covered ranges and the
   protected tail are rejected with the currently valid refs in the error.
+- Layered folding: a plain range creates a tier-1 block; a range that FULLY CONTAINS existing
+  blocks merges them into a higher tier (2, then 3 max). Merged blocks are recorded in
+  `children` and `decompress` reactivates them at their original tier. A range that only
+  PARTIALLY overlaps a block is rejected (swallow the whole block or decompress it first).
+- Permanently protected (the error names the reason and the offending ref): the first user
+  message, the most recent 6 messages, messages carrying media (`@@image:` and friends), and
+  context-kernel tool messages; ranges that split an assistant tool call from its result are
+  rejected too.
+- Token estimates use a real tokenizer (o200k_base); the nudge threshold compares the
+  estimate against the latest assistant response's recorded usage and uses the larger one.
 - A block's summary message is byte-stable in later turns, so the prefix before the block
   keeps hitting the prompt cache.
 - CCR: a single tool result longer than 4000 chars is replaced in the outbound view by a

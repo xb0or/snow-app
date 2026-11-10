@@ -776,12 +776,16 @@ API 档案开启 `contextKernelEnabled` 后，常规对话不再依赖一次性 
 - 消息引用：`m` + 内容哈希（角色 + 正文 + 工具调用/结果 + thinking）。回滚截断、
   fork、重试后引用仍然稳定；块引用的消息不存在时块自动失效。
 - 出站视图：块的首条消息位置插入一条**字节稳定**的摘要消息，块内其余消息被剪掉；
-  首条非系统消息永久 pin，最近 6 条消息受保护。
+  首条非系统消息永久 pin，最近 6 条消息受保护，含媒体载荷的消息与内核自身工具消息
+  永不折叠，拆分工具调用/结果对的范围直接拒绝。
+- 分层折叠：普通范围生成 tier1 块；范围**完整包含**已有块时合并为更高级（tier2 →
+  tier3 上限），父块记录 `children`，`folded_into` 标记的子块不再单独出站；
+  `decompress` 父块会把子块按原层级重新激活。部分相交的范围被拒绝。
 - 状态：`context_kernel_state(conversation_id, sub_agent_id, kernel_version,
 state_json, store_json, updated_at)`，按会话 + 子代理隔离，随会话级联删除。
 - 阈值：复用 `autoCompressThreshold`（未配置时取 `maxContextTokens` 的 60%）。
-  估算 token 或最近一次真实用量达到阈值时在出站尾部追加 nudge，提示模型先查 ref
-  再压缩；nudge 只存在于出站视图，不落库。
+  token 估算走真实分词器（o200k_base），判定取“估算值”与“最近一次真实 usage”的较大
+  值；达到阈值时在出站尾部追加 nudge（含当前最高层级提示），只存在于出站视图、不落库。
 - 工具：`context-kernel-acp_status` / `compress` / `decompress` / `retrieve` /
   `search_context`，全部只读免审批；工具执行前后经 `call_mcp_tool` 注入当前会话，
   模型无法跨会话操作。`compress` 在渲染层还会额外执行 `beforeCompress` hook，

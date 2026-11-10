@@ -4858,6 +4858,8 @@ export const zhTW = {
   "chat.contextKernelExpand": "詳情",
   "chat.contextKernelCollapse": "收起",
   "chat.contextKernelBlockMeta": "{messages} 條 · {tokens} tokens",
+  "chat.contextKernelTier": "層級 {tier}/{max}",
+  "chat.contextKernelMerged": "合併 {count} 塊",
   "chat.compactionSummary": "上下文摘要",
   "chat.compactionExpand": "查看摘要",
   "chat.compactionCollapse": "收起摘要",
