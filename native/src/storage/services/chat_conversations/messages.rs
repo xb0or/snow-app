@@ -63,6 +63,19 @@ pub fn rename_conversation(database_path: &Path, conversation_id: &str, title: &
         .map(|_| ())
 }
 
+/// 清理这些会话的上下文内核状态（父视图 + 每个子代理运行桶）。
+///
+/// 必须在删除事务**提交之后**调用：内核状态用自己的连接，事务未结束时写入会撞
+/// SQLITE_BUSY。失败只会留下不会再被读到的行，不阻断删除。
+fn clear_context_kernel_states(database_path: &Path, conversation_ids: &[String]) {
+    for conversation_id in conversation_ids {
+        let _ = crate::api::conversation::context_kernel::clear_conversation_state(
+            database_path,
+            conversation_id,
+        );
+    }
+}
+
 pub fn delete_conversation(database_path: &Path, conversation_id: &str, delete_memories: bool) -> Result<()> {
     let mut connection = database::open_connection(database_path)
         .map_err(|error| database::database_error(database_path, "delete conversation", error))?;
@@ -293,6 +306,8 @@ pub fn delete_conversation(database_path: &Path, conversation_id: &str, delete_m
 
     // 清理不再被任何会话引用的 checkpoint 快照目录（失败仅产生孤儿目录，不阻断删除）
     cleanup_orphan_checkpoint_files(&checkpoint_ids);
+
+    clear_context_kernel_states(database_path, &conversation_ids);
 
     Ok(())
 }
@@ -566,6 +581,8 @@ pub fn delete_conversations(
 
     // 清理不再被任何会话引用的 checkpoint 快照目录（失败仅产生孤儿目录，不阻断删除）
     cleanup_orphan_checkpoint_files(&checkpoint_ids);
+
+    clear_context_kernel_states(database_path, &all_target_ids);
 
     Ok(())
 }

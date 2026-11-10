@@ -114,6 +114,15 @@ pub struct ResponsesApiRequest {
     /// 原地替换，已完成工具结果的证据行原样保留。允许 messages 为空。
     pub retry_failed_response: Option<bool>,
     pub sub_agent_tools_json: Option<String>,
+    /// Sub-agent run id this request belongs to.
+    ///
+    /// Per-request state that must be isolated per dispatch (currently the context
+    /// kernel's folding state) is keyed by run, not by conversation: one sub-agent
+    /// conversation can be dispatched repeatedly (retry, queued message, re-activation)
+    /// and each dispatch is an independent run. Hosts may pass it explicitly; when
+    /// omitted the backend resolves the newest run for the conversation from the
+    /// `sub_agent_runs` ledger.
+    pub sub_agent_run_id: Option<String>,
     /// Sub-agent-only system prompt. Combined with Snow's built-in protocol
     /// and the selected API profile's prompts for sub-agent requests.
     pub sub_agent_system_prompt: Option<String>,
@@ -394,6 +403,7 @@ async fn create_response_async(
         worktree_mode: request.worktree_mode.unwrap_or(false),
         workflow_mode: request.workflow_mode.unwrap_or(false),
         is_sub_agent: request.is_sub_agent_request(),
+        sub_agent_run_id: request.sub_agent_run_id.as_deref(),
         sub_agent_system_prompt: request.sub_agent_system_prompt.as_deref(),
         system_prompt_ids_json: &api_config.system_prompt_ids_json,
         context_kernel: api_config.context_kernel_enabled,

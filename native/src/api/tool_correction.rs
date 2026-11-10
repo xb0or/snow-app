@@ -183,6 +183,7 @@ async fn request_correction_text(
         retry_failed_response: None,
         sub_agent_tools_json: None,
         sub_agent_system_prompt: None,
+        sub_agent_run_id: None,
         sub_agent_config_profile: None,
         skip_context: Some(true),
         parse_inline_images: None,

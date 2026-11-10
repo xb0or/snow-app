@@ -1845,6 +1845,12 @@ export type ResponsesApiRequest = {
   subAgentToolsJson?: string;
   subAgentSystemPrompt?: string;
   subAgentConfigProfile?: string;
+  /**
+   * Sub-agent run id for this request. Per-run state (the context kernel's folding
+   * state) is keyed by run, not by conversation; when omitted the backend resolves
+   * the newest run for the conversation from the `sub_agent_runs` ledger.
+   */
+  subAgentRunId?: string;
   skipContext?: boolean;
   /**
    * Parse inline `@@image:` tags into multimodal blocks even with

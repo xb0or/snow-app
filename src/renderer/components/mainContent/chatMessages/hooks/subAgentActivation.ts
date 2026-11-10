@@ -526,6 +526,7 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
           // 失败重试：请求消息已随失败回合落库，Rust 只补助手行并替换末尾失败行。
           retryFailedResponse,
           subAgentToolsJson,
+          subAgentRunId: slotOwner,
           subAgentSystemPrompt: subAgentSystemPrompt || undefined,
           // Sub-agents always use their own normal-mode prompt and tool set;
           // WorkTree Mode only carries the parent's persisted workspace binding.

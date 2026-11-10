@@ -65,7 +65,17 @@ impl ContextKernelService {
         }
         let tool_name = tool_name.to_string();
         let args = args.clone();
-        let sub_agent_id = context_kernel::sub_agent_key(is_sub_agent_call, &conversation_id);
+        // 子代理的状态键按**运行（run）**隔离，且必须与出站视图用同一套解析：
+        // 否则工具会读到另一个桶，模型手里的 ref 与它看到的视图对不上。
+        let sub_agent_id = if is_sub_agent_call {
+            context_kernel::resolve_sub_agent_key(
+                std::path::Path::new(&self.db_path),
+                &conversation_id,
+                None,
+            )
+        } else {
+            String::new()
+        };
         let threshold = resolve_threshold();
 
         tokio::task::spawn_blocking(move || {
