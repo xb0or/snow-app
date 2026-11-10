@@ -861,6 +861,61 @@ These texts land in prefix-cache-sensitive positions (system-prompt tail, tool r
 placeholders); changing one character busts every session's cache, so they must not be
 hand-edited — regenerate and re-verify after an upstream bump instead.
 
+#### 10.1.2 Upstream module coverage
+
+Every upstream `acp-kernel` 0.0.101 module (46 `.ts` files plus 5 subdirectory entries)
+and where this port puts it:
+
+| Upstream                        | Status  | Location / notes                                                                                                                                                        |
+| ------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `refs`                          | full    | `refs.rs`: ref arithmetic, `baseIdOf`, `MessageRefMap`, `assignRefs`                                                                                                    |
+| `segment` / `viable`            | full    | `segments.rs`                                                                                                                                                           |
+| `message-kind`                  | full    | `segments.rs`                                                                                                                                                           |
+| `transform-channel`             | full    | `segments.rs`                                                                                                                                                           |
+| `truncate`                      | full    | `segments.rs` (surrogate-safe clamping)                                                                                                                                 |
+| `boundaries`                    | full    | `segments.rs`: `parseBoundary`, visible anchors, block/range intersection                                                                                               |
+| `block-map`                     | full    | `segments.rs`: span resolution, `formatCreatedBlocks`                                                                                                                   |
+| `tool-pairs`                    | full    | `segments.rs` (fixed-point widening)                                                                                                                                    |
+| `reasoning-pairs`               | full    | `segments.rs`                                                                                                                                                           |
+| `turn-integrity`                | full    | `segments.rs`: turn groups plus the fold-integrity gate (INV1/INV2)                                                                                                     |
+| `instance-reid`                 | partial | `segments.rs`: detection and renumbering semantics are present; Snow derives ids from a content hash, so the `_k` slot only applies to payloads that carry ids          |
+| `protected`                     | full    | `protection.rs`: always-protected tools, `NEVER_PRESERVE_RECENT`, latest-only, `toolCallId` pairing                                                                     |
+| `recommend`                     | full    | `protection.rs`: soft-protected refs, compressible/protected ranges, real-character threshold merging                                                                   |
+| `nudge-text`                    | full    | `protection.rs`: `formatRanges` / `formatBlockMap` / `formatTierTargetBlocks` / `renderNudgeText`                                                                       |
+| `output-steering`               | full    | `steering.rs`: turn classification, L0–L4, clamp-only effort, idempotent tail placement                                                                                 |
+| `report`                        | full    | `rendering.rs`: `buildStatusReport` / `buildRecap`                                                                                                                      |
+| `handoff`                       | full    | `rendering.rs`: `renderMessage` / `renderHandoff` / `matchSession`                                                                                                      |
+| `rules`                         | full    | `rendering.rs` plus `execute_rule` (Snow keeps its existing `acp_rule` tool)                                                                                            |
+| `prompts` / `compression-rules` | full    | `texts.rs` (frozen texts) + `porting.rs::resolve_prompts`                                                                                                               |
+| `packs`                         | full    | `porting.rs`: sanitizing, default / lean packs, resolution by name                                                                                                      |
+| `surface-config`                | full    | `porting.rs`: tri-state section overrides, deep description overrides                                                                                                   |
+| `parse-compress-input`          | full    | `porting.rs`: object / line form / lenient JSON / truncation salvage plus diagnostics                                                                                   |
+| `compress-tools`                | full    | upstream schemas in `texts.rs` + `porting.rs::tool_schema`                                                                                                              |
+| `content-store`                 | full    | `content.rs`: sha256 content addressing, first write wins                                                                                                               |
+| `ccr`                           | full    | `content.rs`: placeholders, whole-body parsing, framing, export pointer, `applyRetrieve`                                                                                |
+| `absorb`                        | full    | `absorb.rs`: prompt, candidate test, lenient parsing, prompt appending (block state reuses Snow's absorbed blocks)                                                      |
+| `crush`                         | full    | `absorb.rs`: JSON variance folding / code trimming / log selection plus the two-tier gate                                                                               |
+| `image-compress`                | full    | `image.rs`: header dimensions, tile billing, routing decision, `image_full` state machine                                                                               |
+| `truncate-tools`                | full    | `content.rs`: tool-output budget truncation                                                                                                                             |
+| `cache-report`                  | full    | `analytics.rs`: three-bucket decomposition, fold economics, rendering                                                                                                   |
+| `search`                        | full    | `porting.rs`: role weights plus substring / bm25 / fuzzy / hybrid                                                                                                       |
+| `pipeline`                      | partial | `porting.rs` exposes the node order and effect shape; Snow runs the same order inline in `apply_outgoing_view`                                                          |
+| `filter`                        | partial | `porting.rs` provides part filters and their execution semantics; runtime registration can be hung later                                                                |
+| `sync` / `state`                | partial | Snow maps these onto `prune_stale_blocks` / `KernelState`; `advanceSurvival`, `allocateRunId`, etc. are reserved                                                        |
+| `prune` / `render-refs`         | partial | Snow's `fold` / `hide_consumed` / `decorate_refs` cover the main path; `tokenSnapshot` and `isRenderedSummaryMessage` are not ported                                    |
+| `decompress`                    | partial | `execute_decompress` covers the main restore path; `collectBlockContent` / `activeAncestorIds` / refold-in-place are not ported                                         |
+| `rebuild`                       | full    | `rebuild_state_from_journal` (replays the fold journal; same goal as upstream's compress-call replay, different source)                                                 |
+| `tokenize`                      | full    | reuses `api::token_counter` (real o200k_base tokenizer, more accurate than the upstream estimate)                                                                       |
+| `types` / `index`               | n/a     | Rust structs and module exports replace the barrel and the type declarations                                                                                            |
+| `persist`                       | full    | stored in Snow's `context_kernel_state` / `context_kernel_folds` tables                                                                                                 |
+| `panel` / `wire`                | n/a     | the kernel lives in Rust, the UI uses the existing status bar, and wiring is assembled by each of the five provider lines; upstream's two entries are host-layer duties |
+
+**Remaining deltas** (none of them changes behavior while the feature is off, so they are
+incremental follow-ups): `decompress`' three helper primitives, `render-refs`' token
+snapshot, `prune`'s rendered-summary detection, `state`'s survival promotion / run id,
+`instance-reid`'s `_k` renumbering, `pipeline`'s node-object registry, `filter`'s runtime
+registration, and `sync`'s `deactivated` list.
+
 ## 11. Rollback
 
 `useRollback.ts` aborts the current stream, cancels summary generation, computes the checkpoint diff and TODOs to remove, and shows a preview. After confirmation it waits for stream and summary Promises to finish, avoiding races with SQLite write transactions. The user may truncate conversation only or also call `restoreCheckpoint` for files.
