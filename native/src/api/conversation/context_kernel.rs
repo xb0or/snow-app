@@ -26,8 +26,21 @@ use crate::storage::services::chat_conversations::{
     load_context_messages, ChatContextMessage, ORIGIN_INTERNAL,
 };
 
+// ---------------------------------------------------------------------------
+// 上游模块移植（`acp-kernel` 0.0.101）
+// ---------------------------------------------------------------------------
+//
+// 每个子模块对应上游一个 `.ts` 模块，保持同名语义与字节稳定文本；子模块是纯函数，
+// 通过 `super::` 访问本文件的类型。
+pub mod protection;
+pub mod refs;
+pub mod rendering;
+pub mod segments;
+pub mod steering;
+pub mod texts;
+
 /// 状态结构版本：结构变化时旧状态会被丢弃，而不是解析出错。
-pub const KERNEL_VERSION: &str = "snow-context-kernel/1";
+pub const KERNEL_VERSION: &str = "snow-context-kernel/2";
 
 /// 摘要消息首行（界面层如需过滤内部消息，可按此前缀识别）。
 const SUMMARY_PREFIX: &str = "## Compressed Context";
@@ -98,6 +111,367 @@ const CRUSH_HEAD_CHARS: usize = 2_000;
 const CRUSH_TAIL_CHARS: usize = 800;
 const CRUSH_SAMPLE_ITEMS: usize = 3;
 
+/// 分层折叠（tiers）：tier1 摘要积累到 `tier2_trigger` 条后建议蒸馏，依次类推。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TiersConfig {
+    pub enabled: bool,
+    pub tier2_trigger: i64,
+    pub tier3_trigger: i64,
+}
+
+impl Default for TiersConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            tier2_trigger: 1000,
+            tier3_trigger: 2000,
+        }
+    }
+}
+
+/// nudge 频率与增长闸门（上游 `config.nudge`）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NudgeConfig {
+    pub max_context_limit_pct: f64,
+    pub min_context_limit_pct: f64,
+    pub frequency: u32,
+    pub iteration_threshold: u32,
+    pub force: String,
+    pub growth_ratio: f64,
+    pub growth_floor: i64,
+    pub growth_cap: i64,
+    pub min_growth_floor: i64,
+    pub min_growth_ratio: f64,
+    pub emergency_threshold_pct: f64,
+    pub tier2_growth_multiplier: f64,
+}
+
+impl Default for NudgeConfig {
+    fn default() -> Self {
+        Self {
+            max_context_limit_pct: 0.75,
+            min_context_limit_pct: 0.45,
+            frequency: 5,
+            iteration_threshold: 15,
+            force: "soft".to_string(),
+            growth_ratio: 0.05,
+            growth_floor: 50_000,
+            growth_cap: 50_000,
+            min_growth_floor: 20_000,
+            min_growth_ratio: 0.45,
+            emergency_threshold_pct: 0.95,
+            tier2_growth_multiplier: 1.5,
+        }
+    }
+}
+
+/// 危急裁剪（上游 `config.truncate`）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TruncateConfig {
+    pub threshold: f64,
+    pub terminal_escape_after: u32,
+}
+
+impl Default for TruncateConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.95,
+            terminal_escape_after: 3,
+        }
+    }
+}
+
+/// 压缩闸门（上游 `config.compress`）。`min_compress_range` 是**真实字符数**。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CompressLimits {
+    pub min_compress_range: usize,
+    pub max_summary_length: usize,
+    pub min_summary_length: usize,
+}
+
+impl Default for CompressLimits {
+    fn default() -> Self {
+        Self {
+            min_compress_range: 5_000,
+            max_summary_length: 20_000,
+            min_summary_length: 50,
+        }
+    }
+}
+
+/// absorb（即时工具结果吸收）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AbsorbSettings {
+    pub enabled: bool,
+    pub tool_name: String,
+    pub min_tool_tokens: i64,
+    pub context_threshold_pct: f64,
+    pub exclude_tools: Vec<String>,
+}
+
+impl Default for AbsorbSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tool_name: "absorb".to_string(),
+            min_tool_tokens: 4_000,
+            context_threshold_pct: 0.0,
+            exclude_tools: Vec::new(),
+        }
+    }
+}
+
+/// crush（类型化确定性压缩）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CrushSettings {
+    pub enabled: bool,
+    pub min_reduction: f64,
+}
+
+impl Default for CrushSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_reduction: 0.1,
+        }
+    }
+}
+
+/// 图片下采样（上游 `config.imageCompression`）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ImageCompressionSettings {
+    pub enabled: bool,
+    pub min_tokens: i64,
+    pub max_dimension: u32,
+    pub quality: u8,
+    pub format: String,
+}
+
+impl Default for ImageCompressionSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_tokens: 512,
+            max_dimension: 1_280,
+            quality: 80,
+            format: "webp".to_string(),
+        }
+    }
+}
+
+/// CCR（内容缓存取回）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CcrSettings {
+    pub enabled: bool,
+    pub tool_name: String,
+    pub min_tool_tokens: i64,
+    pub exclude_tools: Vec<String>,
+    pub max_head_chars: usize,
+    pub retrieve_inline_tokens: i64,
+}
+
+impl Default for CcrSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tool_name: "acp_retrieve".to_string(),
+            min_tool_tokens: 4_000,
+            exclude_tools: Vec::new(),
+            max_head_chars: 96,
+            retrieve_inline_tokens: 4_000,
+        }
+    }
+}
+
+/// 输出引导（上游 `config.outputSteering`）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OutputSteeringSettings {
+    pub enabled: bool,
+    pub verbosity_level: i64,
+    pub effort_routing: bool,
+}
+
+impl Default for OutputSteeringSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            verbosity_level: 2,
+            effort_routing: true,
+        }
+    }
+}
+
+/// 持久规则上限（上游 `config.rules`）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RulesSettings {
+    pub max_rules: usize,
+    pub max_rule_chars: usize,
+}
+
+impl Default for RulesSettings {
+    fn default() -> Self {
+        Self {
+            max_rules: 50,
+            max_rule_chars: 300,
+        }
+    }
+}
+
+/// 内核配置：默认值即当前行为，可由 API 档案 `snowcfg.contextKernel` 覆盖。
+///
+/// 解析失败、类型不符或越界一律回落到默认值（validate 后使用），保证内核
+/// 不会因为配置写错而改变出站行为。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KernelConfig {
+    /// 受保护的尾部消息数。
+    pub tail_protected_messages: usize,
+    /// 单会话顶层块上限。
+    pub max_blocks: usize,
+    /// 工具结果超过该字符数即进入 CCR（占位 / 类型化压缩）。
+    pub ccr_min_chars: usize,
+    /// content store 的字符上限（超出按 ref 顺序淘汰）。
+    pub ccr_store_max_chars: usize,
+    /// 超过该字符数的结果先做类型化压缩（crush）而不是纯占位。
+    pub crush_min_chars: usize,
+    /// 出站视图是否渲染 `[ref]` 前缀。
+    pub render_refs: bool,
+    /// 折叠范围是否按轮对齐。
+    pub snap_to_turns: bool,
+    /// 建议区间的最小 token 体量。
+    pub viable_range_min_tokens: i64,
+    /// 是否把输出引导（verbosity directive）附加到 nudge。
+    pub output_steering: bool,
+    /// 覆盖 nudge 正文（多语言 / 团队规范）。
+    pub nudge_override: String,
+
+    // ---- 上游 `Config` 对齐段 ----
+    pub tiers: TiersConfig,
+    pub nudge: NudgeConfig,
+    pub truncate: TruncateConfig,
+    pub compress: CompressLimits,
+    pub protected_tools: Vec<String>,
+    pub protected_latest_tools: Vec<String>,
+    pub preserve_recent_tools: Vec<String>,
+    pub preserve_recent_messages: usize,
+    pub preserve_recent_tokens: i64,
+    pub model_context_limit: i64,
+    pub absorb: AbsorbSettings,
+    pub crush: CrushSettings,
+    pub image_compression: ImageCompressionSettings,
+    pub ccr: CcrSettings,
+    /// 上游 `config.outputSteering`（JSON 键名 `outputSteeringSettings`）。
+    pub output_steering_settings: OutputSteeringSettings,
+    pub rules: RulesSettings,
+}
+
+impl Default for KernelConfig {
+    fn default() -> Self {
+        Self {
+            tail_protected_messages: TAIL_PROTECTED_MESSAGES,
+            max_blocks: MAX_BLOCKS,
+            ccr_min_chars: CCR_MIN_CHARS,
+            ccr_store_max_chars: CCR_STORE_MAX_CHARS,
+            crush_min_chars: CRUSH_MIN_CHARS,
+            render_refs: RENDER_REFS,
+            snap_to_turns: SNAP_TO_TURNS,
+            viable_range_min_tokens: VIABLE_RANGE_MIN_TOKENS,
+            output_steering: false,
+            nudge_override: String::new(),
+            tiers: TiersConfig::default(),
+            nudge: NudgeConfig::default(),
+            truncate: TruncateConfig::default(),
+            compress: CompressLimits::default(),
+            protected_tools: Vec::new(),
+            protected_latest_tools: Vec::new(),
+            preserve_recent_tools: Vec::new(),
+            preserve_recent_messages: 5,
+            preserve_recent_tokens: 5_000,
+            model_context_limit: 200_000,
+            absorb: AbsorbSettings::default(),
+            crush: CrushSettings::default(),
+            image_compression: ImageCompressionSettings::default(),
+            ccr: CcrSettings::default(),
+            output_steering_settings: OutputSteeringSettings::default(),
+            rules: RulesSettings::default(),
+        }
+    }
+}
+
+impl KernelConfig {
+    /// 收敛到安全范围：越界值只会让内核变保守，不会突破保护规则。
+    fn validated(mut self) -> Self {
+        self.tail_protected_messages = self.tail_protected_messages.clamp(1, 64);
+        self.max_blocks = self.max_blocks.clamp(1, 512);
+        self.ccr_min_chars = self.ccr_min_chars.clamp(1_000, 200_000);
+        self.ccr_store_max_chars = self.ccr_store_max_chars.clamp(10_000, 4_000_000);
+        self.crush_min_chars = self.crush_min_chars.clamp(self.ccr_min_chars, 500_000);
+        self.viable_range_min_tokens = self.viable_range_min_tokens.clamp(100, 200_000);
+        self.nudge_override = self.nudge_override.trim().to_string();
+        self.model_context_limit = self.model_context_limit.clamp(1_000, 20_000_000);
+        self.preserve_recent_messages = self.preserve_recent_messages.clamp(1, 64);
+        self.preserve_recent_tokens = self.preserve_recent_tokens.clamp(0, 1_000_000);
+        self.compress.min_compress_range = self.compress.min_compress_range.clamp(100, 1_000_000);
+        self.compress.min_summary_length = self.compress.min_summary_length.clamp(10, 10_000);
+        self.compress.max_summary_length = self
+            .compress
+            .max_summary_length
+            .clamp(self.compress.min_summary_length, 500_000);
+        self.rules.max_rules = self.rules.max_rules.clamp(1, 500);
+        self.rules.max_rule_chars = self.rules.max_rule_chars.clamp(16, 8_000);
+        self.absorb.min_tool_tokens = self.absorb.min_tool_tokens.clamp(100, 2_000_000);
+        self.ccr.min_tool_tokens = self.ccr.min_tool_tokens.clamp(100, 2_000_000);
+        self.ccr.retrieve_inline_tokens = self.ccr.retrieve_inline_tokens.clamp(100, 2_000_000);
+        self.ccr.max_head_chars = self.ccr.max_head_chars.clamp(16, 4_096);
+        self.image_compression.min_tokens = self.image_compression.min_tokens.clamp(16, 1_000_000);
+        self.image_compression.max_dimension = self.image_compression.max_dimension.clamp(64, 8_192);
+        self.image_compression.quality = self.image_compression.quality.clamp(10, 100);
+        self.crush.min_reduction = self.crush.min_reduction.clamp(0.0, 0.95);
+        self.output_steering_settings.verbosity_level =
+            self.output_steering_settings.verbosity_level.clamp(0, 4);
+        if self.tiers.tier2_trigger < 1 {
+            self.tiers.tier2_trigger = 1;
+        }
+        if self.tiers.tier3_trigger < self.tiers.tier2_trigger {
+            self.tiers.tier3_trigger = self.tiers.tier2_trigger;
+        }
+        self
+    }
+
+    fn to_json(&self) -> Value {
+        serde_json::to_value(self).unwrap_or(Value::Null)
+    }
+}
+
+/// 解析当前生效 API 档案里的 `snowcfg.contextKernel` 配置对象。
+pub fn resolve_config() -> KernelConfig {
+    let Ok(context) = crate::api::config::get_active_api_request_context() else {
+        return KernelConfig::default();
+    };
+    let Ok(root) = serde_json::from_str::<Value>(&context.api_config.config_json) else {
+        return KernelConfig::default();
+    };
+    let Some(section) = root
+        .get("snowcfg")
+        .and_then(|snowcfg| snowcfg.get("contextKernel"))
+    else {
+        return KernelConfig::default();
+    };
+    serde_json::from_value::<KernelConfig>(section.clone())
+        .map(KernelConfig::validated)
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KernelBlock {
@@ -120,6 +494,16 @@ pub struct KernelBlock {
     /// absorb 产生的块：记录「已完成工作」而非普通历史摘要。
     pub absorbed: bool,
     pub created_at: String,
+    /// 创建时被覆盖消息的展示跨度（`m00044` / `m00097`）；老块为空，运行时回落推算。
+    pub start_ref: String,
+    pub end_ref: String,
+    /// 摘要的 token / 字符规模（折叠经济学用）。
+    pub summary_tokens: i64,
+    pub summary_chars: usize,
+    /// 存活轮数（`advanceSurvival`）：达到 `promotionThreshold` 后可被升层。
+    pub survival: u32,
+    /// 内容曾被内联恢复（`decompress` 的 refold-in-place 标记）。
+    pub restored_inline: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -168,6 +552,8 @@ pub struct MessageRef {
     pub id: String,
     pub index: usize,
     pub role: String,
+    /// 语义类型：user / assistant / tool-call / tool-result / media / internal / system。
+    pub kind: String,
     pub preview: String,
     pub tokens: i64,
 }
@@ -177,6 +563,7 @@ impl MessageRef {
         json!({
             "ref": self.id,
             "role": self.role,
+            "kind": self.kind,
             "tokens": self.tokens,
             "preview": self.preview,
             "compressed": covered_by.is_some(),
@@ -203,6 +590,7 @@ impl HistoryView {
                 id: id.clone(),
                 index,
                 role: message.role.trim().to_string(),
+                kind: message_kind(message).to_string(),
                 preview: preview_of(&message.content, PREVIEW_CHARS),
                 tokens: estimate_message_tokens(message),
             });
@@ -226,8 +614,10 @@ impl HistoryView {
             .position(|message| !matches!(message.role.trim(), "system" | "developer"))
     }
 
-    fn tail_protected_from(&self) -> usize {
-        self.messages.len().saturating_sub(TAIL_PROTECTED_MESSAGES)
+    fn tail_protected_from(&self, cfg: &KernelConfig) -> usize {
+        self.messages
+            .len()
+            .saturating_sub(cfg.tail_protected_messages)
     }
 }
 
@@ -386,7 +776,7 @@ fn tool_names_of(message: &ChatContextMessage) -> Vec<String> {
 }
 
 /// 含媒体载荷：折叠会丢掉图片引用，因此永久受保护。
-fn has_media_payload(message: &ChatContextMessage) -> bool {
+pub fn has_media_payload(message: &ChatContextMessage) -> bool {
     let mut text = message.content.clone();
     if let Some(raw) = message.tool_results_json.as_deref() {
         text.push_str(raw);
@@ -455,6 +845,8 @@ fn nudge_message(
     threshold: i64,
     highest_tier: u8,
     rules: &[String],
+    steering: Option<(&'static str, &'static str)>,
+    cfg: &KernelConfig,
 ) -> ChatContextMessage {
     let tier_hint = if highest_tier >= MAX_TIER {
         "All active blocks are already tier 3 (the deepest layer); compress a wider span instead of re-folding them."
@@ -475,9 +867,21 @@ fn nudge_message(
                 .join("\n")
         )
     };
-    let content = format!(
-        "{NUDGE_PREFIX}\n\nThe outbound conversation is about {estimate} tokens (auto-compress threshold: {threshold}). Fold older history now instead of letting the request overflow:\n\n1. Call `context-kernel-acp_status` to get message refs (`m...`), the active blocks and `suggestedRanges` (turn-aligned, already checked against every protection rule).\n2. Call `context-kernel-compress` with `from` / `to` refs and a self-contained `summary` that preserves decisions, file paths, failures, and open work. Write the summary in the conversation's language.\n3. {tier_hint}\n4. Work that is finished and no longer needs re-verification can go through `context-kernel-absorb` instead (completion-state summary).\n5. Protected and rejected automatically: the pinned first user message, the most recent turns, media messages, context-kernel tool messages, and any range that splits a tool call/result pair.\n6. Use `context-kernel-search_context` when a folded detail is needed again, `context-kernel-retrieve` for a stored tool output, and `context-kernel-decompress` to restore a block.\n\nOnly the request view is folded — the user still sees the full transcript.{rules_section}"
-    );
+    let steering_section = match steering {
+        Some((kind, directive)) => format!("\n\nOUTPUT STEERING ({kind}): {directive}"),
+        None => String::new(),
+    };
+    let content = if cfg.nudge_override.is_empty() {
+        format!(
+            "{NUDGE_PREFIX}\n\nThe outbound conversation is about {estimate} tokens (auto-compress threshold: {threshold}). Fold older history now instead of letting the request overflow:\n\n1. Call `context-kernel-acp_status` to get message refs (`m...`), the active blocks and `suggestedRanges` (turn-aligned, already checked against every protection rule).\n2. Call `context-kernel-compress` with `from` / `to` refs and a self-contained `summary` that preserves decisions, file paths, failures, and open work. Write the summary in the conversation's language.\n3. {tier_hint}\n4. Work that is finished and no longer needs re-verification can go through `context-kernel-absorb` instead (completion-state summary).\n5. Protected and rejected automatically: the pinned first user message, the most recent turns, media messages, context-kernel tool messages, and any range that splits a tool call/result pair.\n6. Use `context-kernel-search_context` when a folded detail is needed again, `context-kernel-retrieve` for a stored tool output, and `context-kernel-decompress` to restore a block.\n\nOnly the request view is folded — the user still sees the full transcript.{rules_section}{steering_section}"
+        )
+    } else {
+        // 档案覆盖了 nudge 正文：仍附上规则与引导，保证约束不丢。
+        format!(
+            "{NUDGE_PREFIX}\n\n{estimate} / {threshold} tokens.\n\n{}{rules_section}{steering_section}",
+            cfg.nudge_override
+        )
+    };
     ChatContextMessage {
         role: "user".to_string(),
         origin: ORIGIN_INTERNAL.to_string(),
@@ -508,7 +912,7 @@ fn ccr_placeholder(ref_id: &str, kind: &str, text: &str) -> String {
     )
 }
 
-fn store_original(state: &mut KernelState, kind: &str, text: &str) -> String {
+fn store_original(state: &mut KernelState, kind: &str, text: &str, max_chars: usize) -> String {
     let ref_id = ccr_ref(text);
     if state.store.contains_key(&ref_id) {
         return ref_id;
@@ -524,7 +928,7 @@ fn store_original(state: &mut KernelState, kind: &str, text: &str) -> String {
     );
     // 有界存储：超出上限时按 ref 顺序淘汰最早插入的一批（ref 由内容决定，
     // 淘汰只影响 retrieve 可用性，不影响出站字节的稳定性）。
-    while state.stored_chars() > CCR_STORE_MAX_CHARS {
+    while state.stored_chars() > max_chars {
         let Some(oldest) = state.store.keys().next().cloned() else {
             break;
         };
@@ -534,7 +938,11 @@ fn store_original(state: &mut KernelState, kind: &str, text: &str) -> String {
 }
 
 /// 把超长工具结果替换为占位符 / 类型化压缩视图。只改出站副本，落库内容不动。
-fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> usize {
+fn apply_ccr(
+    messages: &mut [ChatContextMessage],
+    state: &mut KernelState,
+    cfg: &KernelConfig,
+) -> usize {
     let mut replaced = 0usize;
     for message in messages.iter_mut() {
         if message.role.trim() != "tool" {
@@ -542,11 +950,11 @@ fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> us
         }
         if !message.content.trim().is_empty()
             && !message.content.starts_with(CCR_MARKER)
-            && message.content.chars().count() >= CCR_MIN_CHARS
+            && message.content.chars().count() >= cfg.ccr_min_chars
         {
             let original = message.content.clone();
-            let ref_id = store_original(state, "tool_text", &original);
-            message.content = ccr_view(&ref_id, "tool_text", &original);
+            let ref_id = store_original(state, "tool_text", &original, cfg.ccr_store_max_chars);
+            message.content = ccr_view(&ref_id, "tool_text", &original, cfg);
             replaced += 1;
         }
         let Some(raw) = message.tool_results_json.clone() else {
@@ -567,11 +975,11 @@ fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> us
             else {
                 continue;
             };
-            if result.starts_with(CCR_MARKER) || result.chars().count() < CCR_MIN_CHARS {
+            if result.starts_with(CCR_MARKER) || result.chars().count() < cfg.ccr_min_chars {
                 continue;
             }
-            let ref_id = store_original(state, "tool_result", &result);
-            entry["result"] = Value::String(ccr_view(&ref_id, "tool_result", &result));
+            let ref_id = store_original(state, "tool_result", &result, cfg.ccr_store_max_chars);
+            entry["result"] = Value::String(ccr_view(&ref_id, "tool_result", &result, cfg));
             changed = true;
             replaced += 1;
         }
@@ -583,9 +991,9 @@ fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> us
 }
 
 /// 出站占位文本：小结果用纯占位（省 token），超大结果先做类型化压缩（保信息）。
-fn ccr_view(ref_id: &str, kind: &str, text: &str) -> String {
+fn ccr_view(ref_id: &str, kind: &str, text: &str, cfg: &KernelConfig) -> String {
     let chars = text.chars().count();
-    if chars < CRUSH_MIN_CHARS {
+    if chars < cfg.crush_min_chars {
         return ccr_placeholder(ref_id, kind, text);
     }
     let (crushed, crushed_kind) = crush_tool_result(text);
@@ -822,8 +1230,9 @@ fn expand_to_turn_bounds(
     messages: &[ChatContextMessage],
     start: usize,
     end: usize,
+    cfg: &KernelConfig,
 ) -> (usize, usize, bool) {
-    if !SNAP_TO_TURNS {
+    if !cfg.snap_to_turns {
         return (start, end, false);
     }
     let mut low = start;
@@ -841,10 +1250,14 @@ fn expand_to_turn_bounds(
 ///
 /// 允许区间包含已有块（那是 tier 升级合并的场景），但要求至少含一条未覆盖
 /// 消息或一个可完整吞掉的块，否则折了也没有收益。
-fn viable_ranges(view: &HistoryView, state: &KernelState) -> Vec<(usize, usize)> {
+fn viable_ranges(
+    view: &HistoryView,
+    state: &KernelState,
+    cfg: &KernelConfig,
+) -> Vec<(usize, usize)> {
     let covered = covered_lookup(state);
     let pinned = view.pinned_index();
-    let tail_from = view.tail_protected_from();
+    let tail_from = view.tail_protected_from(cfg);
     let usable: Vec<bool> = view
         .messages
         .iter()
@@ -879,7 +1292,7 @@ fn viable_ranges(view: &HistoryView, state: &KernelState) -> Vec<(usize, usize)>
                 return false;
             }
             let tokens: i64 = view.refs[*from..=*to].iter().map(|item| item.tokens).sum();
-            if tokens < VIABLE_RANGE_MIN_TOKENS {
+            if tokens < cfg.viable_range_min_tokens {
                 return false;
             }
             let has_new = (*from..=*to).any(|index| !covered.contains_key(&view.refs[index].id));
@@ -1072,6 +1485,7 @@ pub fn rebuild_state_from_journal(
                     tokens_after: after,
                     absorbed: event == "absorb",
                     created_at,
+                    ..KernelBlock::default()
                 });
             }
             "decompress" => {
@@ -1254,14 +1668,24 @@ fn prune_stale_blocks(state: &mut KernelState, positions: &HashMap<String, usize
 fn fold(
     messages: &[ChatContextMessage],
     state: &KernelState,
-    render_refs: bool,
+    cfg: &KernelConfig,
 ) -> (Vec<ChatContextMessage>, i64) {
+    let render_refs = cfg.render_refs;
     let view = HistoryView::build(messages.to_vec());
     let pairs = tool_pair_index(&view.messages);
+    let protection = protection_config(cfg);
+    let protected_calls = protection::collect_protected_tool_call_ids(&view.messages, &protection);
     let blocked: Vec<bool> = view
         .messages
         .iter()
-        .map(|message| compression_blocked_reason(message).is_some())
+        .map(|message| {
+            compression_blocked_reason(message).is_some()
+                || protection::is_message_protected_with_pairing(
+                    message,
+                    &protection,
+                    &protected_calls,
+                )
+        })
         .collect();
     let ranges = block_ranges(state, &view.positions, &pairs, &blocked);
     if ranges.is_empty() {
@@ -1337,6 +1761,76 @@ fn decorate_refs(
     messages
 }
 
+/// JSON 数组且非空（判断 assistant 是否真的带工具调用）。
+fn has_json_entries(raw: &str) -> bool {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|value| value.as_array().map(|entries| !entries.is_empty()))
+        .unwrap_or(false)
+}
+
+/// 一条消息的语义类型（refs / 检索结果里给模型看，避免它猜）。
+fn message_kind(message: &ChatContextMessage) -> &'static str {
+    if message.origin == ORIGIN_INTERNAL {
+        return "internal";
+    }
+    match message.role.trim() {
+        "system" | "developer" => "system",
+        "tool" => "tool-result",
+        "assistant" => {
+            if has_media_payload(message) {
+                "media"
+            } else if message
+                .tool_calls_json
+                .as_deref()
+                .is_some_and(has_json_entries)
+            {
+                "tool-call"
+            } else {
+                "assistant"
+            }
+        }
+        "user" => {
+            if has_media_payload(message) {
+                "media"
+            } else {
+                "user"
+            }
+        }
+        _ => "other",
+    }
+}
+
+/// 输出引导（output-steering 的决策部分）：按最近轮次性质给出 verbosity 指令。
+/// 默认关闭，只有档案里显式打开 `outputSteering` 才会写进 nudge。
+fn steering_directive(messages: &[ChatContextMessage]) -> Option<(&'static str, &'static str)> {
+    let recent: Vec<&ChatContextMessage> = messages.iter().rev().take(30).collect();
+    if recent.is_empty() {
+        return None;
+    }
+    let tool_heavy = recent
+        .iter()
+        .filter(|message| message.role.trim() == "tool")
+        .count();
+    let media = recent
+        .iter()
+        .filter(|message| has_media_payload(message))
+        .count();
+    if tool_heavy >= 8 {
+        Some((
+            "tool_heavy",
+            "Tool-heavy stretch: keep replies to the decision and the next action; do not restate tool output.",
+        ))
+    } else if media > 0 {
+        Some((
+            "visual",
+            "Media in play: refer to images by their file path instead of describing them at length.",
+        ))
+    } else {
+        None
+    }
+}
+
 /// 用于 ref 匹配的稳定指纹（角色 + 正文 + 工具负载）。
 fn fingerprint(message: &ChatContextMessage) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -1369,12 +1863,13 @@ pub fn apply_outgoing_view(
         return Ok(0);
     }
     let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
+    let cfg = resolve_config();
     let positions = HistoryView::build(messages.clone()).positions;
     let mut changed = prune_stale_blocks(&mut state, &positions);
 
-    let (mut folded, mut tokens) = fold(messages, &state, RENDER_REFS);
+    let (mut folded, mut tokens) = fold(messages, &state, &cfg);
     // CCR：超长工具结果在出站视图里换成冻结占位符，原文进入 content store。
-    if apply_ccr(&mut folded, &mut state) > 0 {
+    if apply_ccr(&mut folded, &mut state, &cfg) > 0 {
         changed = true;
         // 占位符会显著缩小出站体积，nudge 判断必须用压缩后的估算。
         tokens = folded.iter().map(estimate_message_tokens).sum();
@@ -1392,11 +1887,29 @@ pub fn apply_outgoing_view(
                 .map(|block| block.tier)
                 .max()
                 .unwrap_or(0);
+            let steering = if cfg.output_steering || cfg.output_steering_settings.enabled {
+                let structural = steering::structural_summary(&folded);
+                let decision = steering::decide_output_steering(
+                    &structural,
+                    &steering::OutputSteeringConfig {
+                        enabled: true,
+                        verbosity_level: cfg.output_steering_settings.verbosity_level,
+                        effort_routing: cfg.output_steering_settings.effort_routing,
+                    },
+                );
+                texts::verbosity_directive(decision.verbosity_level)
+                    .map(|text| (decision.turn_kind.as_str(), text))
+                    .or_else(|| steering_directive(&folded))
+            } else {
+                None
+            };
             folded.push(nudge_message(
                 effective,
                 threshold,
                 highest_tier,
                 &state.rules,
+                steering,
+                &cfg,
             ));
         }
     }
@@ -1517,6 +2030,7 @@ fn compress_range(
 
     let messages = load_history(database_path, conversation_id)?;
     let view = HistoryView::build(messages);
+    let cfg = resolve_config();
     let from_index = view.positions.get(&from).copied().ok_or_else(|| {
         Error::new(
             Status::InvalidArg,
@@ -1535,7 +2049,7 @@ fn compress_range(
         (to_index, from_index)
     };
     // 按轮对齐：范围向外扩张到完整的轮，避免把一次交互切成两半。
-    let (start, end, snapped) = expand_to_turn_bounds(&view.messages, start, end);
+    let (start, end, snapped) = expand_to_turn_bounds(&view.messages, start, end, &cfg);
     let span = end - start + 1;
     if span < MIN_COMPRESS_MESSAGES {
         return Err(Error::new(
@@ -1551,7 +2065,7 @@ fn compress_range(
             ));
         }
     }
-    let tail_from = view.tail_protected_from();
+    let tail_from = view.tail_protected_from(&cfg);
     if end >= tail_from {
         return Err(Error::new(
             Status::InvalidArg,
@@ -1594,10 +2108,10 @@ fn compress_range(
         .iter()
         .filter(|block| block.folded_into.is_empty())
         .count();
-    if active_top >= MAX_BLOCKS {
+    if active_top >= cfg.max_blocks {
         return Err(Error::new(
             Status::InvalidArg,
-            format!("At most {MAX_BLOCKS} blocks per conversation. Decompress or merge existing blocks first."),
+            format!("At most {} blocks per conversation. Decompress or merge existing blocks first.", cfg.max_blocks),
         ));
     }
     let target_ids: Vec<String> = view.refs[start..=end]
@@ -1664,8 +2178,16 @@ fn compress_range(
         tokens_after: 0,
         absorbed,
         created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        start_ref: view.refs[start].id.clone(),
+        end_ref: view.refs[end].id.clone(),
+        summary_tokens: 0,
+        summary_chars: 0,
+        survival: 0,
+        restored_inline: false,
     };
+    placeholder.summary_chars = placeholder.summary.chars().count();
     placeholder.tokens_after = estimate_message_tokens(&summary_message(&placeholder, target_ids.len()));
+    placeholder.summary_tokens = placeholder.tokens_after;
     let block = placeholder;
     let summary_tokens = block.tokens_after;
     state.blocks.push(block.clone());
@@ -1955,11 +2477,12 @@ fn execute_cache(
     let messages = load_history(database_path, conversation_id)?;
     let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
     let view = HistoryView::build(messages);
+    let cfg = resolve_config();
     prune_stale_blocks(&mut state, &view.positions);
-    let (folded, folded_tokens) = fold(&view.messages, &state, RENDER_REFS);
+    let (folded, folded_tokens) = fold(&view.messages, &state, &cfg);
     let mut preview = folded.clone();
     let mut state_preview = state.clone();
-    let outbound_tokens = if apply_ccr(&mut preview, &mut state_preview) > 0 {
+    let outbound_tokens = if apply_ccr(&mut preview, &mut state_preview, &cfg) > 0 {
         preview.iter().map(estimate_message_tokens).sum()
     } else {
         folded_tokens
@@ -2041,14 +2564,15 @@ fn execute_status(
     let messages = load_history(database_path, conversation_id)?;
     let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
     let view = HistoryView::build(messages);
+    let cfg = resolve_config();
     prune_stale_blocks(&mut state, &view.positions);
-    let (mut folded, mut folded_tokens) = fold(&view.messages, &state, RENDER_REFS);
+    let (mut folded, mut folded_tokens) = fold(&view.messages, &state, &cfg);
     // 状态里的 token 估算与出站预览都必须是「真实出站字节」：就地应用 CCR/crush。
-    if apply_ccr(&mut folded, &mut state) > 0 {
+    if apply_ccr(&mut folded, &mut state, &cfg) > 0 {
         folded_tokens = folded.iter().map(estimate_message_tokens).sum();
     }
     let covered = covered_lookup(&state);
-    let tail_from = view.tail_protected_from();
+    let tail_from = view.tail_protected_from(&cfg);
     let pinned = view.pinned_index();
     // 出站预览：折叠 + ref 渲染 + CCR/crush + 隐藏已消费调用之后的真实前几行，
     // 既给 UI 用，也让“出站字节到底长什么样”可被验证。
@@ -2065,7 +2589,7 @@ fn execute_status(
         })
         .collect();
     // 建议区间：按轮对齐、排除受保护消息、体量达标，模型可以直接照抄。
-    let suggested_json: Vec<Value> = viable_ranges(&view, &state)
+    let suggested_json: Vec<Value> = viable_ranges(&view, &state, &cfg)
         .into_iter()
         .map(|(from, to)| {
             json!({
@@ -2155,6 +2679,7 @@ fn execute_status(
         "storedEntries": state.store.len(),
         "storedChars": state.stored_chars(),
         "rules": state.rules,
+        "config": cfg.to_json(),
         "absorbedBlocks": state
             .blocks
             .iter()
@@ -2166,11 +2691,130 @@ fn execute_status(
         "refs": refs_json,
         "protected": {
             "pinnedRef": pinned.and_then(|index| view.refs.get(index)).map(|item| item.id.clone()).unwrap_or_default(),
-            "tailMessages": TAIL_PROTECTED_MESSAGES,
+            "tailMessages": cfg.tail_protected_messages,
             "mediaMarkers": MEDIA_MARKERS,
             "kernelTools": KERNEL_TOOL_PREFIX,
         },
     }))
+}
+
+/// `context-kernel-recap`: 出站块的压缩回放（上游 `buildRecap`）。
+///
+/// Goal / WorkTree 模式与 UI 直接复用：现状 + 每个活动块的跨度、层数与已省 token。
+fn execute_recap(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    args: &Value,
+) -> Result<Value> {
+    let state = load_state(database_path, conversation_id, sub_agent_id)?;
+    let block_id = args
+        .get("blockId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let text = rendering::build_recap(&state, block_id);
+    Ok(json!({
+        "success": true,
+        "blockId": block_id.unwrap_or(""),
+        "recap": text,
+    }))
+}
+
+/// `context-kernel-handoff`: 交接文档（上游 `renderHandoff`）。
+///
+/// 供 Goal / WorkTree 模式在交接点生成一份可读快照；`full` 打开时连同被折叠段
+/// 的原文一起渲染，`folded` 打开时按持久快照原样渲染。
+fn execute_handoff(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    args: &Value,
+) -> Result<Value> {
+    let state = load_state(database_path, conversation_id, sub_agent_id)?;
+    let cfg = resolve_config();
+    let messages = load_history(database_path, conversation_id)?;
+    let view = HistoryView::build(messages);
+    let pairs = tool_pair_index(&view.messages);
+    let ranges = block_ranges(&state, &view.positions, &pairs, &folded_blocked(&state, &view, &cfg));
+    let folded = fold(&view.messages, &state, &cfg).0;
+    let full = args.get("full").and_then(Value::as_bool).unwrap_or(true);
+    // 折叠后的视图与原始下标不再一一对应，refs 由 `render_message` 按内容指纹重挂；
+    // 这里显式传空表，避免给出错位的 ref。
+    let folded_refs_of: Vec<String> = Vec::new();
+    let title = args
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+    let blocks_full: Vec<rendering::HandoffBlockFull> = if full {
+        ranges
+            .iter()
+            .map(|(start, end, block)| rendering::HandoffBlockFull {
+                block_id: block.id.clone(),
+                topic: block.title.clone(),
+                count: block.message_ids.len(),
+                full_text: view.messages[*start..=*end]
+                    .iter()
+                    .map(|message| rendering::render_message(message, None))
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let rendered = rendering::render_handoff(&rendering::HandoffInput {
+        messages: &folded,
+        state: &state,
+        full,
+        folded: false,
+        blocks_full,
+        meta: rendering::HandoffMeta {
+            title,
+            label: String::new(),
+            session_id: conversation_id.to_string(),
+            context_tokens: latest_usage_tokens(database_path, conversation_id),
+            extra_bullets: Vec::new(),
+        },
+        refs_of: folded_refs_of,
+    });
+    Ok(json!({
+        "success": true,
+        "handoff": rendered,
+        "blocks": state.blocks.len(),
+        "active": state.blocks.iter().filter(|block| block.folded_into.is_empty()).count(),
+    }))
+}
+
+/// 供 `handoff` 复用的「永不折叠」位图：系统 / 媒体 / 内核工具消息，以及配置里
+/// 声明的受保护工具（含其配对的另一半）。
+fn folded_blocked(state: &KernelState, view: &HistoryView, cfg: &KernelConfig) -> Vec<bool> {
+    let _ = state;
+    let protection = protection_config(cfg);
+    let protected_calls = protection::collect_protected_tool_call_ids(&view.messages, &protection);
+    view.messages
+        .iter()
+        .map(|message| {
+            compression_blocked_reason(message).is_some()
+                || protection::is_message_protected_with_pairing(
+                    message,
+                    &protection,
+                    &protected_calls,
+                )
+        })
+        .collect()
+}
+
+/// 由内核配置构造保护规则切片。
+fn protection_config(cfg: &KernelConfig) -> protection::ProtectionConfig {
+    protection::ProtectionConfig {
+        protected_tools: cfg.protected_tools.clone(),
+        preserve_recent_tools: cfg.preserve_recent_tools.clone(),
+        protected_latest_tools: cfg.protected_latest_tools.clone(),
+        kernel_tool_prefix: KERNEL_TOOL_PREFIX.to_string(),
+    }
 }
 
 /// 供内置工具服务调用的统一入口。
@@ -2203,6 +2847,8 @@ pub fn execute_tool(
             threshold_tokens,
             args,
         ),
+        "recap" => execute_recap(database_path, conversation_id, sub_agent_id, args),
+        "handoff" => execute_handoff(database_path, conversation_id, sub_agent_id, args),
         other => Err(Error::new(
             Status::InvalidArg,
             format!("Unknown context-kernel tool: {other}"),

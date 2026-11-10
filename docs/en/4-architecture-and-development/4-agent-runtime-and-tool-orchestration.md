@@ -829,6 +829,29 @@ flowchart TD
 > [ranxianglei/billion-context](https://github.com/ranxianglei/billion-context) (MIT).
 > This is an adaptation of its kernel semantics to Snow's native layer.
 
+#### 10.1.1 Upstream module map
+
+The kernel ports upstream `acp-kernel` 0.0.101 module by module; the submodules under
+`native/src/api/conversation/context_kernel/` mirror the upstream file names.
+
+| Upstream module                                                                                    | Snow location          | Semantics                                                                                                                            |
+| -------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `refs`                                                                                             | `refs.rs`              | `mNNNNN` ref assignment / parsing, `baseIdOf`, summary message ids                                                                   |
+| `segment` / `viable` / `message-kind` / `transform-channel` / `truncate`                           | `segments.rs`          | Array-adjacency segmentation, viable ranges (≥200 tokens), tool-message detection, transform-channel choice, surrogate-safe clamping |
+| `boundaries` / `block-map` / `tool-pairs` / `reasoning-pairs` / `turn-integrity` / `instance-reid` | `segments.rs`          | Boundary parsing, block spans, tool/reasoning pair widening, turn atomicity (#684), covered-instance renumbering                     |
+| `protected` / `recommend` / `nudge-text`                                                           | `protection.rs`        | Always-protected tools, recent-window exclusion, compressible/protected ranges, byte-aligned nudge rendering                         |
+| `output-steering`                                                                                  | `steering.rs`          | Turn classification, verbosity L0–L4, clamp-only effort routing, idempotent tail placement                                           |
+| `report` / `handoff` / `rules`                                                                     | `rendering.rs`         | Status report, compression recap, session handoff document, persistent-rule rendering                                                |
+| All constants                                                                                      | `texts.rs` (generated) | Verbosity directives, placeholders, absorb / image_full notices, compression rules, tool schemas                                     |
+
+`texts.rs` is exported straight from the upstream dist by `scripts/gen-kernel-texts.mjs`
+and can be diffed constant-by-constant with `scripts/verify-kernel-texts.mjs` (all 53
+constants/arrays must be byte-identical). Both scripts read the `ACP_KERNEL_DIST`
+environment variable (defaulting to a local unpacked `acp-kernel/dist/index.js`).
+These texts land in prefix-cache-sensitive positions (system-prompt tail, tool results,
+placeholders); changing one character busts every session's cache, so they must not be
+hand-edited — regenerate and re-verify after an upstream bump instead.
+
 ## 11. Rollback
 
 `useRollback.ts` aborts the current stream, cancels summary generation, computes the checkpoint diff and TODOs to remove, and shows a preview. After confirmation it waits for stream and summary Promises to finish, avoiding races with SQLite write transactions. The user may truncate conversation only or also call `restoreCheckpoint` for files.
