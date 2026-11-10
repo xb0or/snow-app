@@ -727,6 +727,34 @@ pub async fn prepare_context_request(
     // 历史图片按总量老化 / TODO 结果精简（仅请求副本）。
     super::history_trim::trim_history_for_request(&mut messages, request.database_path);
 
+    // --- 上下文内核：只折叠「出站视图」 ---
+    // 完整历史仍保留在 chat_messages 中（界面展示不变），这里仅把发给模型的
+    // 消息列表按压缩块替换为摘要。以下路径不进入内核：
+    // - ephemeral / skip_context：上方已提前返回
+    // - 旧 handoff（context_compaction / resume_after_compaction）：保持现有语义，
+    //   避免同一轮既走内核折叠又生成常规自动 handoff
+    if request.context_kernel
+        && !request.context_compaction
+        && !request.resume_after_compaction
+    {
+        let sub_agent_id =
+            super::context_kernel::sub_agent_key(request.is_sub_agent, &conversation_id);
+        let threshold = super::context_kernel::resolve_threshold(
+            request.auto_compress_threshold,
+            request.max_context_tokens,
+        );
+        if let Err(error) = super::context_kernel::apply_outgoing_view(
+            request.database_path,
+            &conversation_id,
+            &sub_agent_id,
+            threshold,
+            &mut messages,
+        ) {
+            // 上下文管理失败绝不能阻断请求：退回未折叠视图。
+            eprintln!("context kernel skipped: {}", error.reason);
+        }
+    }
+
     Ok(PreparedConversationRequest {
         conversation_id,
         messages,

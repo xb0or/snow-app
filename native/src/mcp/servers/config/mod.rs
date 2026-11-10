@@ -423,6 +423,11 @@ const SNOWCFG_SCOPE_KEYS: &[KeySpec] = &[
         sensitive: false,
     },
     KeySpec {
+        key: "contextKernelEnabled",
+        value_type: ValueType::Bool,
+        sensitive: false,
+    },
+    KeySpec {
         key: "toolResultTokenLimit",
         value_type: ValueType::Int,
         sensitive: false,
@@ -3031,6 +3036,7 @@ KEY RULES: (1) hookType whitelist: onUserMessage, beforeToolCall, toolConfirmati
                     "visionModel": record.vision_model,
                     "maxContextTokens": record.max_context_tokens,
                     "maxTokens": record.max_tokens,
+                    "contextKernelEnabled": record.context_kernel_enabled,
                     "source": record.source,
                     "updatedAt": record.updated_at,
                 })
@@ -3155,6 +3161,7 @@ KEY RULES: (1) hookType whitelist: onUserMessage, beforeToolCall, toolConfirmati
                     "isActive" => record.is_active,
                     "supportsVision" => record.supports_vision,
                     "enableAutoCompress" => record.enable_auto_compress,
+                    "contextKernelEnabled" => record.context_kernel_enabled,
                     _ => default,
                 })
                 .unwrap_or(default)
@@ -3174,6 +3181,7 @@ KEY RULES: (1) hookType whitelist: onUserMessage, beforeToolCall, toolConfirmati
         let max_tokens = int_field("maxTokens");
         let stream_idle_timeout_sec = int_field("streamIdleTimeoutSec");
         let enable_auto_compress = bool_field("enableAutoCompress", true);
+        let context_kernel_enabled = bool_field("contextKernelEnabled", false);
         let auto_compress_threshold = int_field("autoCompressThreshold");
         let max_retries = int_field("maxRetries");
         let retry_base_delay_ms = int_field("retryBaseDelayMs");
@@ -3206,6 +3214,7 @@ KEY RULES: (1) hookType whitelist: onUserMessage, beforeToolCall, toolConfirmati
                 "streamIdleTimeoutSec": stream_idle_timeout_sec,
                 "enableAutoCompress": enable_auto_compress,
                 "autoCompressThreshold": auto_compress_threshold,
+                "contextKernelEnabled": context_kernel_enabled,
                 "maxRetries": max_retries,
                 "retryDelayMs": retry_base_delay_ms,
                 "partialRetryMaxChars": partial_retry_max_chars,
@@ -3237,6 +3246,7 @@ KEY RULES: (1) hookType whitelist: onUserMessage, beforeToolCall, toolConfirmati
             max_tokens,
             stream_idle_timeout_sec,
             enable_auto_compress,
+            context_kernel_enabled,
             auto_compress_threshold,
             max_retries,
             retry_base_delay_ms,

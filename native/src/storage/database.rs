@@ -17,6 +17,8 @@ use super::{
 
 /// Bumped whenever the schema changes; written to `PRAGMA user_version` after
 /// a successful `create_schema` so the app can detect stale databases.
+/// 70: context_kernel_state table (billion-context incremental folding state,
+/// scoped by conversation + sub-agent; cascade-deleted with the conversation).
 /// 69: chat message origin, preserving unknown provenance for existing rows.
 /// 68: system_prompt_snapshots table (per-conversation frozen ROLE.md rules and
 /// API-configured system prompts; dropped on successful context compaction).
@@ -63,7 +65,7 @@ use super::{
 /// 32: api_configs canonical config_json migration plus conversation runtime config columns.
 /// 31: main's scheduled-tasks pre-script migration (30) + PR #65's three
 /// stream-interruption migrations (29 baseline + 4 total additions).
-const CURRENT_SCHEMA_VERSION: i64 = 69;
+const CURRENT_SCHEMA_VERSION: i64 = 70;
 const SNOWFLAKE_EPOCH_MS: u64 = 1_704_067_200_000;
 const SNOWFLAKE_WORKER_ID_BITS: u64 = 10;
 const SNOWFLAKE_SEQUENCE_BITS: u64 = 12;
@@ -1384,6 +1386,19 @@ CREATE TABLE IF NOT EXISTS app_plugins (
             role_overrides_builtin INTEGER NOT NULL DEFAULT 0,
             user_prompts_json TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+          );
+
+          -- 上下文内核状态（billion-context 增量折叠）：按会话 + 子代理隔离，
+          -- 只保存块摘要与被覆盖消息的内容哈希 id；完整历史仍在 chat_messages。
+          CREATE TABLE IF NOT EXISTS context_kernel_state (
+            conversation_id TEXT NOT NULL,
+            sub_agent_id TEXT NOT NULL DEFAULT '',
+            kernel_version TEXT NOT NULL,
+            state_json TEXT NOT NULL,
+            store_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            PRIMARY KEY (conversation_id, sub_agent_id),
+            FOREIGN KEY(conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE
           );
      ",
     )?;

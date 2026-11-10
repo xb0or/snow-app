@@ -29,6 +29,8 @@ export type ApiConfigFormData = {
   streamIdleTimeoutSec: string;
   enableAutoCompress: boolean;
   autoCompressThreshold: string;
+  /** 上下文内核（billion-context 增量折叠）开关。 */
+  contextKernelEnabled: boolean;
   toolResultTokenLimit: string;
   maxRetries: string;
   retryBaseDelayMs: string;

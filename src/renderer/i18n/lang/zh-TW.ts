@@ -2572,6 +2572,9 @@ export const zhTW = {
   "settings.apiAutoCompressThresholdNeedMaxContext":
     "請先填寫最大上下文，用於計算 token 閾值。",
   "settings.apiAutoCompressThresholdCalculated": "計算閾值：{tokens} tokens",
+  "settings.apiContextKernel": "上下文內核（增量折疊）",
+  "settings.apiContextKernelHint":
+    "用模型驅動的增量折疊替代一次性 handoff，只裁剪送給模型的消息視圖，歷史與介面顯示不變。預設關閉。",
   "settings.active": "啟用",
   "settings.inactive": "未啟用",
   "settings.activeProfile": "已啟用配置",

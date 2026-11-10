@@ -747,6 +747,59 @@ flowchart TD
     I -- no --> K[Delete the temporary checkpoint]
 ```
 
+### 10.1 Context kernel (incremental folding)
+
+With `contextKernelEnabled` on for the API profile, normal conversations no longer depend on
+a one-shot handoff: the model folds older messages into blocks on demand, following a nudge.
+The full transcript still goes to `chat_messages`, the UI is unchanged, and only the
+**outbound view** produced by `prepare_context_request` is pruned.
+
+- Insertion point: `native/src/api/conversation/context.rs`, after tool-pairing repair and
+  `trim_history_for_request`, before any provider builds its payload. All five provider
+  paths share it.
+- Skipped paths: ephemeral requests, `skip_context`, and the legacy handoff
+  (`contextCompaction` / `resumeAfterCompaction`). The renderer stops issuing the regular
+  auto handoff for the main loop when the kernel is on; sub-agents and WorkFlow nodes keep
+  their dedicated handoffs so one turn is never compressed twice.
+- Message refs: `m` + content hash (role + text + tool calls/results + thinking). Refs stay
+  stable across rollback truncation, forks and retries; a block whose messages vanished is
+  dropped automatically.
+- Outbound view: a **byte-stable** summary message is inserted at the block's first position
+  and the covered messages are removed. The first non-system message is pinned forever and
+  the most recent 6 messages are protected.
+- State: `context_kernel_state(conversation_id, sub_agent_id, kernel_version, state_json,
+store_json, updated_at)`, scoped by conversation + sub-agent and cascade-deleted with the
+  conversation.
+- Threshold: reuses `autoCompressThreshold` (falling back to 60% of `maxContextTokens`).
+  When the estimated outbound tokens reach it, a nudge is appended to the outbound tail; the
+  nudge is never persisted.
+- Tools: `context-kernel-acp_status` / `compress` / `decompress` / `search_context`, all
+  read-only (no approval). `call_mcp_tool` injects the current conversation, so the model
+  cannot operate on another one.
+- Off (default): the tools are filtered out of the payload and folding never runs, so the
+  request is identical to the pre-feature behaviour.
+
+```mermaid
+flowchart TD
+    A[prepare_context_request] --> B{contextKernel enabled?}
+    B -- no --> Z[return canonical history unchanged]
+    B -- yes --> C{ephemeral / skip_context / legacy handoff?}
+    C -- yes --> Z
+    C -- no --> D[load and validate context_kernel_state]
+    D --> E{block messages still exist?}
+    E -- no --> E1[drop stale blocks]
+    E -- yes --> F[replace blocks with summary messages<br/>pin first, protect tail]
+    E1 --> F
+    F --> G{estimated tokens >= threshold?}
+    G -- yes --> H[append nudge to the outbound tail]
+    G -- no --> I[return folded view]
+    H --> I
+```
+
+> Source: `acp-kernel` from
+> [ranxianglei/billion-context](https://github.com/ranxianglei/billion-context) (MIT).
+> This is an adaptation of its kernel semantics to Snow's native layer.
+
 ## 11. Rollback
 
 `useRollback.ts` aborts the current stream, cancels summary generation, computes the checkpoint diff and TODOs to remove, and shows a preview. After confirmation it waits for stream and summary Promises to finish, avoiding races with SQLite write transactions. The user may truncate conversation only or also call `restoreCheckpoint` for files.

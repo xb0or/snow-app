@@ -288,7 +288,7 @@ Returns a read-only array of installed plugins from the renderer plugin store. E
 
 Field-level sensitive: `apiKey`, `visionApiKey` to `apiKeys` · Not live · No parameters
 
-Returns the API profile array. Key fields: `profileName`, `displayName`, `isActive`, `baseUrl`, `baseUrlMode`, `requestMethod`, `advancedModel`, `basicModel`, `supportsVision`, `visionModel`, `maxContextTokens`, `maxTokens`, `enableAutoCompress`, `autoCompressThreshold`, `systemPromptIdsJson`, `customHeaderSchemeId`, `sortOrder`, `source`, `updatedAt`.
+Returns the API profile array. Key fields: `profileName`, `displayName`, `isActive`, `baseUrl`, `baseUrlMode`, `requestMethod`, `advancedModel`, `basicModel`, `supportsVision`, `visionModel`, `maxContextTokens`, `maxTokens`, `enableAutoCompress`, `autoCompressThreshold`, `contextKernelEnabled`, `systemPromptIdsJson`, `customHeaderSchemeId`, `sortOrder`, `source`, `updatedAt`.
 
 #### 4.2.2 `apiModels`
 

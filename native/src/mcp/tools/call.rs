@@ -13,6 +13,7 @@ use super::super::servers::bash::{BashService, BashStreamCallback, BashStreamChu
 use super::super::servers::browser::{BrowserCommandCallback, BrowserService};
 use super::super::servers::codebase::CodebaseService;
 use super::super::servers::config::ConfigService;
+use super::super::servers::context_kernel::ContextKernelService;
 use super::super::servers::decision::DecisionService;
 use super::super::servers::filesystem::FilesystemService;
 use super::super::servers::grep::GrepService;
@@ -608,6 +609,12 @@ pub async fn call_mcp_tool(
         // 模型传入的 sessionId 参数一律忽略，无法跨会话读写。
         TodoService::new()
             .execute_async(&args, conversation_id.as_deref())
+            .await
+            .validation_feedback(is_sub_agent_call)?
+    } else if let Some(tool_name) = tool_full_name.strip_prefix("context-kernel-") {
+        // 上下文内核：会话由分发层注入，模型无法指定别的会话。
+        ContextKernelService::new()
+            .execute_async(tool_name, &args, conversation_id.as_deref(), is_sub_agent_call)
             .await
             .validation_feedback(is_sub_agent_call)?
     } else if let Some(tool_name) = tool_full_name.strip_prefix("toolSearch-") {

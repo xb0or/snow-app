@@ -1081,6 +1081,36 @@ export function ApiSettingsFormFields({
           </div>
           <label className="api-settings-field">
             <span>
+              {t("settings.apiContextKernel", {
+                defaultValue: "Context kernel (incremental folding)",
+              })}
+            </span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={data.contextKernelEnabled}
+                onChange={changeField("contextKernelEnabled")}
+                disabled={disabled}
+                hidden
+              />
+              <span className="toggle-slider" />
+              <span>
+                {data.contextKernelEnabled
+                  ? t("settings.active", { defaultValue: ENABLED_STATUS_LABEL })
+                  : t("settings.inactive", {
+                      defaultValue: DISABLED_STATUS_LABEL,
+                    })}
+              </span>
+            </label>
+          </label>
+          <span className="api-settings-threshold-hint">
+            {t("settings.apiContextKernelHint", {
+              defaultValue:
+                "Replaces one-shot auto handoffs with model-driven incremental folding of the outbound view. Stored history and the UI keep every message. Requires the context-kernel tools; off by default.",
+            })}
+          </span>
+          <label className="api-settings-field">
+            <span>
               {t("settings.apiSetActive", { defaultValue: "Enable profile" })}
             </span>
             <label className="toggle-switch">

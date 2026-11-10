@@ -197,6 +197,7 @@ fn build_input(
         max_tokens: spec.max_tokens.filter(|value| *value > 0),
         stream_idle_timeout_sec: None,
         enable_auto_compress: true,
+        context_kernel_enabled: false,
         auto_compress_threshold: None,
         max_retries: None,
         retry_base_delay_ms: None,
