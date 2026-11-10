@@ -233,7 +233,25 @@ fn migrate_context_kernel_state(connection: &Connection) -> rusqlite::Result<()>
            FOREIGN KEY(conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE
          );
          CREATE INDEX IF NOT EXISTS idx_context_kernel_state_updated
-           ON context_kernel_state(updated_at);",
+           ON context_kernel_state(updated_at);
+         CREATE TABLE IF NOT EXISTS context_kernel_folds (
+           id TEXT PRIMARY KEY NOT NULL,
+           conversation_id TEXT NOT NULL,
+           sub_agent_id TEXT NOT NULL DEFAULT '',
+           event TEXT NOT NULL,
+           block_id TEXT NOT NULL,
+           parent_block_id TEXT NOT NULL DEFAULT '',
+           tier INTEGER NOT NULL DEFAULT 1,
+           title TEXT NOT NULL DEFAULT '',
+           summary TEXT NOT NULL DEFAULT '',
+           message_ids_json TEXT NOT NULL DEFAULT '[]',
+           tokens_before INTEGER NOT NULL DEFAULT 0,
+           tokens_after INTEGER NOT NULL DEFAULT 0,
+           created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+           FOREIGN KEY(conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE
+         );
+         CREATE INDEX IF NOT EXISTS idx_context_kernel_folds_conversation
+           ON context_kernel_folds(conversation_id, sub_agent_id, id ASC);",
     )
 }
 

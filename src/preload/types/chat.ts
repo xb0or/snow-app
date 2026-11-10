@@ -212,6 +212,27 @@ export type ContextKernelStatus = {
   /** 当前最高折叠层级（0 = 无块；上限 `maxTier`）。 */
   highestTier: number;
   maxTier: number;
+  /** absorb 产生的块数量。 */
+  absorbedBlocks?: number;
+  /** 折叠累计省下的 token（按顶层块）。 */
+  tokensSavedByFolding?: number;
+  /** 活动折叠规则。 */
+  rules?: string[];
+  /** 建议折叠区间（已按轮对齐并通过保护校验）。 */
+  suggestedRanges?: {
+    from: string;
+    to: string;
+    turns: number;
+    messages: number;
+    tokens: number;
+  }[];
+  /** 出站视图前几行（折叠 + ref + CCR/crush + 隐藏已消费调用后的真实字节）。 */
+  outboundPreview?: {
+    role: string;
+    origin: string;
+    tokens: number;
+    head: string;
+  }[];
   storedEntries: number;
   storedChars: number;
   blocks: ContextKernelBlockStatus[];

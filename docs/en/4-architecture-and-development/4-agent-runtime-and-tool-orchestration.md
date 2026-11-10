@@ -779,10 +779,25 @@ store_json, updated_at)`, scoped by conversation + sub-agent and cascade-deleted
   Token estimates use a real tokenizer (o200k_base) and the decision takes the larger of the
   estimate and the latest real usage; when it trips, a nudge (with the current highest tier)
   is appended to the outbound tail and never persisted.
-- Tools: `context-kernel-acp_status` / `compress` / `decompress` / `retrieve` /
-  `search_context`, all read-only (no approval). `call_mcp_tool` injects the current
-  conversation, so the model cannot operate on another one. `compress` additionally runs the
-  renderer-side `beforeCompress` hook (warn / decision / abort).
+- Tools: `context-kernel-acp_status` / `compress` / `absorb` / `decompress` / `retrieve` /
+  `search_context` / `acp_cache` / `acp_rule`, all read-only (no approval). `call_mcp_tool`
+  injects the current conversation, so the model cannot operate on another one. `compress`
+  additionally runs the renderer-side `beforeCompress` hook (warn / decision / abort).
+- Turn alignment and suggestions: folded ranges expand to whole turns (`snappedToTurns`), and
+  `acp_status` returns `suggestedRanges` that are already turn-aligned and checked against
+  every protection rule, so the model can copy one instead of guessing.
+- Ref rendering: user/assistant text in the outbound view gets a `[m…] ` prefix (tool
+  messages do not); the prefix comes from the content hash and is byte-stable across turns.
+- Consumed calls are hidden: once a block's summary is live, the compress/absorb call that
+  produced it is removed from the outbound view as a pair.
+- Long tool results: >= 4000 chars become a placeholder; >= 12000 chars are first typologically
+  crushed (JSON structure + samples, log head/tail) while the original stays retrievable.
+- Fold journal and rebuild: `context_kernel_folds` (schema 71) records fold / merge / absorb /
+  decompress; if the state row is lost or corrupted the state is replayed from the journal,
+  absorb flags and tiers included.
+- Fold economics: `acp_cache` plus `tokensSavedByFolding`, tier breakdown and compression
+  ratio in the status payload; the composer status bar shows blocks, tier, stored refs and
+  token usage.
 - CCR: a single tool result longer than 4000 chars is replaced in the outbound view by a
   content-hash-derived `[context-kernel:stored ref=cr…]` placeholder; the original goes into
   a bounded content store (400k chars). Placeholders are frozen once created, so later turns

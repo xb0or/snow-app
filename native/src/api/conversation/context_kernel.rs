@@ -67,7 +67,36 @@ const MESSAGE_OVERHEAD_TOKENS: i64 = 4;
 const KERNEL_TOOL_PREFIX: &str = "context-kernel-";
 
 /// 含媒体载荷的消息永久受保护（折叠会丢失图片引用）。
-const MEDIA_MARKERS: &[&str] = &["@@image:", "data:image/", "\"type\":\"image\"", "\"type\": \"image\""];
+const MEDIA_MARKERS: &[&str] = &[
+    "@@image:",
+    "data:image/",
+    "\"type\":\"image\"",
+    "\"type\": \"image\"",
+];
+
+/// 折叠范围自动对齐到「轮」（user 开启新轮，assistant + 其工具调用/结果同轮）。
+const SNAP_TO_TURNS: bool = true;
+
+/// 建议区间的最小体量：低于这个 token 数的范围不值得折叠。
+const VIABLE_RANGE_MIN_TOKENS: i64 = 800;
+
+/// 状态里最多给出多少个建议区间。
+const MAX_SUGGESTED_RANGES: usize = 5;
+
+/// 出站视图是否在 user/assistant 文本前渲染 `[ref]`（计划里的 renderTags:
+/// text-only）。只改文本消息，绝不写入工具调用参数；前缀由内容哈希决定，
+/// 跨轮次字节一致。
+const RENDER_REFS: bool = true;
+
+/// 折叠规则（acp_rule）上限：条数与单条长度。
+const MAX_RULES: usize = 32;
+const MAX_RULE_CHARS: usize = 500;
+
+/// 超过该字符数的工具结果在出站视图里先做类型化压缩（crush），再决定是否占位。
+const CRUSH_MIN_CHARS: usize = 12_000;
+const CRUSH_HEAD_CHARS: usize = 2_000;
+const CRUSH_TAIL_CHARS: usize = 800;
+const CRUSH_SAMPLE_ITEMS: usize = 3;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -85,6 +114,11 @@ pub struct KernelBlock {
     pub children: Vec<String>,
     /// 非空表示已被父块合并（父块删除后子块重新生效）。
     pub folded_into: String,
+    /// 折叠收益：被覆盖消息的 token 估算 / 摘要消息的 token 估算。
+    pub tokens_before: i64,
+    pub tokens_after: i64,
+    /// absorb 产生的块：记录「已完成工作」而非普通历史摘要。
+    pub absorbed: bool,
     pub created_at: String,
 }
 
@@ -98,6 +132,8 @@ pub struct KernelState {
     /// CCR content store：`cr<hash>` → 原始工具结果。占位符一旦生成即冻结，
     /// 后续轮次重新计算出同样的占位字节，前缀缓存不受影响。
     pub store: BTreeMap<String, StoredEntry>,
+    /// 用户/项目级折叠规则（acp_rule）：作为压缩约束注入 nudge 与摘要要求。
+    pub rules: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -117,6 +153,7 @@ impl KernelState {
             next_block_id: 1,
             updated_at: String::new(),
             store: BTreeMap::new(),
+            rules: Vec::new(),
         }
     }
 
@@ -413,7 +450,12 @@ fn summary_message(block: &KernelBlock, span: usize) -> ChatContextMessage {
     }
 }
 
-fn nudge_message(estimate: i64, threshold: i64, highest_tier: u8) -> ChatContextMessage {
+fn nudge_message(
+    estimate: i64,
+    threshold: i64,
+    highest_tier: u8,
+    rules: &[String],
+) -> ChatContextMessage {
     let tier_hint = if highest_tier >= MAX_TIER {
         "All active blocks are already tier 3 (the deepest layer); compress a wider span instead of re-folding them."
     } else if highest_tier >= 1 {
@@ -421,8 +463,20 @@ fn nudge_message(estimate: i64, threshold: i64, highest_tier: u8) -> ChatContext
     } else {
         "Pick a contiguous run of older messages and fold it into a tier-1 summary."
     };
+    let rules_section = if rules.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nFOLDING RULES (binding — honour them in every summary):\n{}",
+            rules
+                .iter()
+                .map(|rule| format!("- {rule}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
     let content = format!(
-        "{NUDGE_PREFIX}\n\nThe outbound conversation is about {estimate} tokens (auto-compress threshold: {threshold}). Fold older history now instead of letting the request overflow:\n\n1. Call `context-kernel-acp_status` to get message refs (`m...`) and the active blocks.\n2. Call `context-kernel-compress` with `from` / `to` refs and a self-contained `summary` that preserves decisions, file paths, failures, and open work. Write the summary in the conversation's language.\n3. {tier_hint}\n4. Protected and rejected automatically: the pinned first user message, the most recent turns, media messages, context-kernel tool messages, and any range that splits a tool call/result pair.\n5. Use `context-kernel-search_context` when a folded detail is needed again, `context-kernel-retrieve` for a stored tool output, and `context-kernel-decompress` to restore a block.\n\nOnly the request view is folded — the user still sees the full transcript."
+        "{NUDGE_PREFIX}\n\nThe outbound conversation is about {estimate} tokens (auto-compress threshold: {threshold}). Fold older history now instead of letting the request overflow:\n\n1. Call `context-kernel-acp_status` to get message refs (`m...`), the active blocks and `suggestedRanges` (turn-aligned, already checked against every protection rule).\n2. Call `context-kernel-compress` with `from` / `to` refs and a self-contained `summary` that preserves decisions, file paths, failures, and open work. Write the summary in the conversation's language.\n3. {tier_hint}\n4. Work that is finished and no longer needs re-verification can go through `context-kernel-absorb` instead (completion-state summary).\n5. Protected and rejected automatically: the pinned first user message, the most recent turns, media messages, context-kernel tool messages, and any range that splits a tool call/result pair.\n6. Use `context-kernel-search_context` when a folded detail is needed again, `context-kernel-retrieve` for a stored tool output, and `context-kernel-decompress` to restore a block.\n\nOnly the request view is folded — the user still sees the full transcript.{rules_section}"
     );
     ChatContextMessage {
         role: "user".to_string(),
@@ -479,7 +533,7 @@ fn store_original(state: &mut KernelState, kind: &str, text: &str) -> String {
     ref_id
 }
 
-/// 把超长工具结果替换为占位符。只改出站副本，落库内容不动。
+/// 把超长工具结果替换为占位符 / 类型化压缩视图。只改出站副本，落库内容不动。
 fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> usize {
     let mut replaced = 0usize;
     for message in messages.iter_mut() {
@@ -490,8 +544,9 @@ fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> us
             && !message.content.starts_with(CCR_MARKER)
             && message.content.chars().count() >= CCR_MIN_CHARS
         {
-            let ref_id = store_original(state, "tool_text", &message.content);
-            message.content = ccr_placeholder(&ref_id, "tool_text", &message.content);
+            let original = message.content.clone();
+            let ref_id = store_original(state, "tool_text", &original);
+            message.content = ccr_view(&ref_id, "tool_text", &original);
             replaced += 1;
         }
         let Some(raw) = message.tool_results_json.clone() else {
@@ -516,7 +571,7 @@ fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> us
                 continue;
             }
             let ref_id = store_original(state, "tool_result", &result);
-            entry["result"] = Value::String(ccr_placeholder(&ref_id, "tool_result", &result));
+            entry["result"] = Value::String(ccr_view(&ref_id, "tool_result", &result));
             changed = true;
             replaced += 1;
         }
@@ -525,6 +580,190 @@ fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> us
         }
     }
     replaced
+}
+
+/// 出站占位文本：小结果用纯占位（省 token），超大结果先做类型化压缩（保信息）。
+fn ccr_view(ref_id: &str, kind: &str, text: &str) -> String {
+    let chars = text.chars().count();
+    if chars < CRUSH_MIN_CHARS {
+        return ccr_placeholder(ref_id, kind, text);
+    }
+    let (crushed, crushed_kind) = crush_tool_result(text);
+    format!(
+        "{CCR_MARKER} ref={ref_id} kind={crushed_kind} chars={chars}]\n{crushed}\n\n> Crushed view: structure and head/tail kept, the full output is stored out of band. Call `context-kernel-retrieve` with ref \"{ref_id}\" for the original."
+    )
+}
+
+/// 类型化压缩：超长工具输出保留结构信息（JSON 结构 / 日志首尾），而不是直接丢弃。
+fn crush_tool_result(text: &str) -> (String, &'static str) {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+            if let Some(crushed) = crush_json(&value) {
+                return (crushed, "json");
+            }
+        }
+    }
+    (crush_head_tail(text), "text")
+}
+
+fn crush_json(value: &Value) -> Option<String> {
+    match value {
+        Value::Array(items) => {
+            if items.is_empty() {
+                return None;
+            }
+            let sample: Vec<String> = items
+                .iter()
+                .take(CRUSH_SAMPLE_ITEMS)
+                .map(|item| truncate_chars(&item.to_string(), 400))
+                .collect();
+            Some(format!(
+                "[json-array] {} item(s); first {}: {}{}",
+                items.len(),
+                sample.len(),
+                sample.join(" | "),
+                if items.len() > sample.len() { "; …" } else { "" }
+            ))
+        }
+        Value::Object(map) => {
+            if map.is_empty() {
+                return None;
+            }
+            let keys: Vec<&str> = map.keys().take(30).map(String::as_str).collect();
+            let preview = map
+                .iter()
+                .take(CRUSH_SAMPLE_ITEMS)
+                .map(|(key, value)| format!("{key}={}", truncate_chars(&value.to_string(), 200)))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            Some(format!(
+                "[json-object] {} key(s): {}; sample: {}",
+                map.len(),
+                keys.join(", "),
+                preview
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn crush_head_tail(text: &str) -> String {
+    let total = text.chars().count();
+    let head: String = text.chars().take(CRUSH_HEAD_CHARS).collect();
+    let tail: String = {
+        let tail_chars: Vec<char> = text.chars().rev().take(CRUSH_TAIL_CHARS).collect();
+        tail_chars.into_iter().rev().collect()
+    };
+    let omitted = total.saturating_sub(CRUSH_HEAD_CHARS + CRUSH_TAIL_CHARS);
+    format!("{head}\n… {omitted} chars omitted …\n{tail}")
+}
+
+fn truncate_chars(text: &str, limit: usize) -> String {
+    let mut chars = text.chars();
+    let mut out: String = chars.by_ref().take(limit).collect();
+    if chars.next().is_some() {
+        out.push('…');
+    }
+    out
+}
+
+/// 隐藏已被消费的内核压缩/吸收调用：块仍有效时，把它的 assistant tool_call 与
+/// 对应 tool 结果**成对**移出出站视图（保留配对，provider 不会看到孤立 tool-call）。
+/// 摘要本身已经在块里，这些调用只剩重复 token。
+fn hide_consumed(messages: Vec<ChatContextMessage>, state: &KernelState) -> Vec<ChatContextMessage> {
+    let active: HashSet<&str> = state.blocks.iter().map(|block| block.id.as_str()).collect();
+    if active.is_empty() {
+        return messages;
+    }
+    let mut consumed: HashSet<String> = HashSet::new();
+    for message in messages.iter() {
+        if message.role.trim() != "tool" {
+            continue;
+        }
+        let Some(raw) = message.tool_results_json.as_deref() else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(raw) else {
+            continue;
+        };
+        let Some(entries) = value.as_array() else {
+            continue;
+        };
+        for entry in entries {
+            let name = entry.get("name").and_then(Value::as_str).unwrap_or("");
+            if !matches!(
+                name,
+                "context-kernel-compress" | "context-kernel-absorb" | "context-kernel-decompress"
+            ) {
+                continue;
+            }
+            let block_id = entry
+                .get("result")
+                .and_then(Value::as_str)
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .and_then(|parsed| {
+                    parsed
+                        .get("blockId")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)
+                })
+                .unwrap_or_default();
+            if !block_id.is_empty() && active.contains(block_id.as_str()) {
+                if let Some(call_id) = entry.get("callId").and_then(Value::as_str) {
+                    consumed.insert(call_id.to_string());
+                }
+            }
+        }
+    }
+    if consumed.is_empty() {
+        return messages;
+    }
+    messages
+        .into_iter()
+        .filter(|message| match message.role.trim() {
+            "tool" => {
+                let Some(raw) = message.tool_results_json.as_deref() else {
+                    return true;
+                };
+                let Ok(value) = serde_json::from_str::<Value>(raw) else {
+                    return true;
+                };
+                let Some(entries) = value.as_array() else {
+                    return true;
+                };
+                !(!entries.is_empty()
+                    && entries.iter().all(|entry| {
+                        entry
+                            .get("callId")
+                            .and_then(Value::as_str)
+                            .map(|id| consumed.contains(id))
+                            .unwrap_or(false)
+                    }))
+            }
+            "assistant" => {
+                let Some(raw) = message.tool_calls_json.as_deref() else {
+                    return true;
+                };
+                let Ok(value) = serde_json::from_str::<Value>(raw) else {
+                    return true;
+                };
+                let Some(entries) = value.as_array() else {
+                    return true;
+                };
+                !(!entries.is_empty()
+                    && entries.iter().all(|entry| {
+                        let id = entry
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .or_else(|| entry.get("callId").and_then(Value::as_str))
+                            .unwrap_or("");
+                        consumed.contains(id)
+                    }))
+            }
+            _ => true,
+        })
+        .collect()
 }
 
 /// `context-kernel-retrieve`: 按 ref 取回被占位符替换的原始工具结果。
@@ -553,7 +792,127 @@ fn execute_retrieve(
     }))
 }
 
-/// 最近一次 assistant 响应记录的真实用量（input + output + cache）。
+/// 一轮对话的 [start, end] 下标区间：user/system 开启新轮，assistant 与其
+/// 工具调用/结果属于同一轮。折叠必须按轮对齐，否则会把一次交互切成两半。
+fn turn_spans(messages: &[ChatContextMessage]) -> Vec<(usize, usize)> {
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut start: Option<usize> = None;
+    for (index, message) in messages.iter().enumerate() {
+        let opens_turn = matches!(message.role.trim(), "user" | "system" | "developer");
+        if opens_turn {
+            if let Some(previous) = start.take() {
+                if previous < index {
+                    spans.push((previous, index - 1));
+                }
+            }
+            start = Some(index);
+        } else if start.is_none() {
+            start = Some(index);
+        }
+    }
+    if let Some(previous) = start {
+        spans.push((previous, messages.len().saturating_sub(1)));
+    }
+    spans.retain(|(from, to)| from <= to);
+    spans
+}
+
+/// 把范围向外扩张到完整的轮边界（fold 至少覆盖整轮）。
+fn expand_to_turn_bounds(
+    messages: &[ChatContextMessage],
+    start: usize,
+    end: usize,
+) -> (usize, usize, bool) {
+    if !SNAP_TO_TURNS {
+        return (start, end, false);
+    }
+    let mut low = start;
+    let mut high = end;
+    for (from, to) in turn_spans(messages) {
+        if to >= low && from <= high {
+            low = low.min(from);
+            high = high.max(to);
+        }
+    }
+    (low, high, low != start || high != end)
+}
+
+/// 候选折叠区间：按轮对齐、排除 pin/尾部/受保护消息，体量达标才返回。
+///
+/// 允许区间包含已有块（那是 tier 升级合并的场景），但要求至少含一条未覆盖
+/// 消息或一个可完整吞掉的块，否则折了也没有收益。
+fn viable_ranges(view: &HistoryView, state: &KernelState) -> Vec<(usize, usize)> {
+    let covered = covered_lookup(state);
+    let pinned = view.pinned_index();
+    let tail_from = view.tail_protected_from();
+    let usable: Vec<bool> = view
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            if compression_blocked_reason(message).is_some() {
+                return false;
+            }
+            pinned != Some(index) && index < tail_from
+        })
+        .collect();
+
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    let mut current: Option<(usize, usize)> = None;
+    for (from, to) in turn_spans(&view.messages) {
+        if (from..=to).all(|index| usable[index]) {
+            current = Some(match current {
+                Some((run_start, _)) => (run_start, to),
+                None => (from, to),
+            });
+        } else if let Some(run) = current.take() {
+            runs.push(run);
+        }
+    }
+    if let Some(run) = current {
+        runs.push(run);
+    }
+
+    runs.into_iter()
+        .filter(|(from, to)| {
+            if to - from + 1 < MIN_COMPRESS_MESSAGES {
+                return false;
+            }
+            let tokens: i64 = view.refs[*from..=*to].iter().map(|item| item.tokens).sum();
+            if tokens < VIABLE_RANGE_MIN_TOKENS {
+                return false;
+            }
+            let has_new = (*from..=*to).any(|index| !covered.contains_key(&view.refs[index].id));
+            let has_mergeable_block = state
+                .blocks
+                .iter()
+                .filter(|block| block.folded_into.is_empty())
+                .any(|block| {
+                    let mut indices: Vec<usize> = block
+                        .message_ids
+                        .iter()
+                        .filter_map(|id| view.positions.get(id).copied())
+                        .collect();
+                    if indices.is_empty() {
+                        return false;
+                    }
+                    indices.sort_unstable();
+                    indices[0] >= *from && indices[indices.len() - 1] <= *to
+                });
+            has_new || has_mergeable_block
+        })
+        .take(MAX_SUGGESTED_RANGES)
+        .collect()
+}
+
+/// 一个区间跨了多少轮（用于状态展示与模型决策）。
+fn turns_in_range(messages: &[ChatContextMessage], start: usize, end: usize) -> usize {
+    turn_spans(messages)
+        .into_iter()
+        .filter(|(from, to)| *to >= start && *from <= end)
+        .count()
+}
+
 /// nudge 优先使用上游真实 usage，估算器只作补充。
 pub fn latest_usage_tokens(database_path: &Path, conversation_id: &str) -> Option<i64> {
     if conversation_id.trim().is_empty() {
@@ -585,6 +944,10 @@ pub fn latest_usage_tokens(database_path: &Path, conversation_id: &str) -> Optio
 // State persistence
 // ---------------------------------------------------------------------------
 
+/// 状态持久化 + 折叠日志（append-only journal）。
+///
+/// journal 是状态的重建来源：状态行丢失、损坏、或历史被回滚/分叉时，按事件
+/// 顺序重放 fold / merge / decompress 即可重建 `CompressionState`。
 pub fn load_state(
     database_path: &Path,
     conversation_id: &str,
@@ -604,20 +967,180 @@ pub fn load_state(
             |row| row.get(0),
         )
         .ok();
-    let Some(raw) = raw else {
-        return Ok(KernelState::fresh());
-    };
-    match serde_json::from_str::<KernelState>(&raw) {
-        Ok(mut state) if state.version == KERNEL_VERSION => {
-            if state.next_block_id == 0 {
-                state.next_block_id =
-                    state.blocks.len() as u64 + 1;
+    drop(connection);
+    if let Some(raw) = raw {
+        if let Ok(mut state) = serde_json::from_str::<KernelState>(&raw) {
+            if state.version == KERNEL_VERSION {
+                if state.next_block_id == 0 {
+                    state.next_block_id = state.blocks.len() as u64 + 1;
+                }
+                return Ok(state);
             }
-            Ok(state)
         }
-        // 旧版本 / 损坏状态：丢弃即可，历史本身还在数据库里。
-        _ => Ok(KernelState::fresh()),
     }
+    // 状态行缺失 / 版本不符 / 解析失败：按折叠日志重建，并把结果写回。
+    let rebuilt = rebuild_state_from_journal(database_path, conversation_id, sub_agent_id)?;
+    if !rebuilt.blocks.is_empty() {
+        let _ = save_state(database_path, conversation_id, sub_agent_id, &rebuilt);
+        eprintln!(
+            "context kernel: rebuilt {} block(s) from the fold journal",
+            rebuilt.blocks.len()
+        );
+    }
+    Ok(rebuilt)
+}
+
+/// 按 `context_kernel_folds` 顺序重放，重建状态。
+pub fn rebuild_state_from_journal(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+) -> Result<KernelState> {
+    let mut state = KernelState::fresh();
+    if conversation_id.trim().is_empty() {
+        return Ok(state);
+    }
+    let connection = database::open_connection(database_path)
+        .map_err(|error| database::database_error(database_path, "open context kernel journal", error))?;
+    let mut statement = connection
+        .prepare(
+            "SELECT event, block_id, parent_block_id, tier, title, summary, message_ids_json,
+                    tokens_before, tokens_after, created_at
+               FROM context_kernel_folds
+              WHERE conversation_id = ?1 AND sub_agent_id = ?2
+              ORDER BY id ASC",
+        )
+        .map_err(|error| database::database_error(database_path, "prepare kernel journal", error))?;
+    let rows = statement
+        .query_map(rusqlite::params![conversation_id, sub_agent_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        })
+        .map_err(|error| database::database_error(database_path, "query kernel journal", error))?;
+    for row in rows {
+        let (event, block_id, parent_block_id, tier, title, summary, ids_json, before, after, created_at) =
+            row.map_err(|error| {
+                database::database_error(database_path, "read kernel journal", error)
+            })?;
+        match event.as_str() {
+            "fold" | "merge" | "absorb" => {
+                let message_ids: Vec<String> = serde_json::from_str(&ids_json).unwrap_or_default();
+                if message_ids.len() < MIN_COMPRESS_MESSAGES {
+                    continue;
+                }
+                if !parent_block_id.is_empty() {
+                    if let Some(child) = state.blocks.iter_mut().find(|block| block.id == block_id) {
+                        child.folded_into = parent_block_id.clone();
+                        continue;
+                    }
+                }
+                if state.blocks.iter().any(|block| block.id == block_id) {
+                    continue;
+                }
+                let next = state
+                    .blocks
+                    .iter()
+                    .filter_map(|block| {
+                        block
+                            .id
+                            .strip_prefix('b')
+                            .and_then(|value| value.parse::<u64>().ok())
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    .max(state.next_block_id.saturating_sub(1));
+                state.next_block_id = next + 2;
+                state.blocks.push(KernelBlock {
+                    id: block_id,
+                    title,
+                    summary,
+                    message_ids,
+                    tier: tier.clamp(1, MAX_TIER as i64) as u8,
+                    children: Vec::new(),
+                    folded_into: String::new(),
+                    tokens_before: before,
+                    tokens_after: after,
+                    absorbed: event == "absorb",
+                    created_at,
+                });
+            }
+            "decompress" => {
+                let children: Vec<String> = state
+                    .blocks
+                    .iter()
+                    .filter(|block| block.folded_into == block_id)
+                    .map(|block| block.id.clone())
+                    .collect();
+                state.blocks.retain(|block| block.id != block_id);
+                for child_id in children {
+                    if let Some(child) = state.blocks.iter_mut().find(|block| block.id == child_id) {
+                        child.folded_into.clear();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // 父子关系补齐：父块的 children 由 folded_into 反推。
+    let links: Vec<(String, String)> = state
+        .blocks
+        .iter()
+        .filter(|block| !block.folded_into.is_empty())
+        .map(|block| (block.folded_into.clone(), block.id.clone()))
+        .collect();
+    for (parent_id, child_id) in links {
+        if let Some(parent) = state.blocks.iter_mut().find(|block| block.id == parent_id) {
+            if !parent.children.contains(&child_id) {
+                parent.children.push(child_id);
+            }
+        }
+    }
+    Ok(state)
+}
+
+/// 追加一条折叠日志（失败不阻断工具执行：journal 只是重建来源）。
+fn journal_append(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    event: &str,
+    block: &KernelBlock,
+    parent_block_id: &str,
+) {
+    let Ok(connection) = database::open_connection(database_path) else {
+        return;
+    };
+    let ids_json = serde_json::to_string(&block.message_ids).unwrap_or_else(|_| "[]".to_string());
+    let _ = connection.execute(
+        "INSERT INTO context_kernel_folds
+            (id, conversation_id, sub_agent_id, event, block_id, parent_block_id, tier, title,
+             summary, message_ids_json, tokens_before, tokens_after, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now', 'localtime'))",
+        rusqlite::params![
+            database::create_snowflake_id(),
+            conversation_id,
+            sub_agent_id,
+            event,
+            block.id,
+            parent_block_id,
+            i64::from(block.tier),
+            block.title,
+            block.summary,
+            ids_json,
+            block.tokens_before,
+            block.tokens_after,
+        ],
+    );
 }
 
 fn save_state(
@@ -724,7 +1247,15 @@ fn prune_stale_blocks(state: &mut KernelState, positions: &HashMap<String, usize
 }
 
 /// 把被块覆盖的消息替换成摘要消息；返回折叠后视图的 token 估算。
-fn fold(messages: &[ChatContextMessage], state: &KernelState) -> (Vec<ChatContextMessage>, i64) {
+///
+/// `render_refs` 打开时给 user/assistant 文本前缀 `[ref]`（renderTags:
+/// text-only），模型无需调用 acp_status 就能引用消息；工具消息不动，避免破坏
+/// 结果解析。
+fn fold(
+    messages: &[ChatContextMessage],
+    state: &KernelState,
+    render_refs: bool,
+) -> (Vec<ChatContextMessage>, i64) {
     let view = HistoryView::build(messages.to_vec());
     let pairs = tool_pair_index(&view.messages);
     let blocked: Vec<bool> = view
@@ -734,7 +1265,10 @@ fn fold(messages: &[ChatContextMessage], state: &KernelState) -> (Vec<ChatContex
         .collect();
     let ranges = block_ranges(state, &view.positions, &pairs, &blocked);
     if ranges.is_empty() {
-        return (messages.to_vec(), view.total_tokens());
+        let visible = hide_consumed(view.messages.clone(), state);
+        let decorated = decorate_refs(&view, Some(visible), render_refs);
+        let tokens: i64 = decorated.iter().map(estimate_message_tokens).sum();
+        return (decorated, tokens);
     }
 
     let mut by_start: HashMap<usize, Vec<(usize, KernelBlock)>> = HashMap::new();
@@ -756,8 +1290,68 @@ fn fold(messages: &[ChatContextMessage], state: &KernelState) -> (Vec<ChatContex
         folded.push(messages[index].clone());
         index += 1;
     }
-    let tokens: i64 = folded.iter().map(estimate_message_tokens).sum();
-    (folded, tokens)
+    let visible = hide_consumed(folded, state);
+    let decorated = decorate_refs(&view, Some(visible), render_refs);
+    let tokens: i64 = decorated.iter().map(estimate_message_tokens).sum();
+    (decorated, tokens)
+}
+
+/// 给未折叠的文本消息加 `[ref]` 前缀（幂等：已带同前缀的不重复加）。
+///
+/// 只处理 user/assistant 文本消息；工具消息与内核注入的内部消息（摘要、
+/// nudge、宿主事实）不挂 ref，避免破坏结果解析或污染内部文本。
+fn decorate_refs(
+    view: &HistoryView,
+    folded: Option<Vec<ChatContextMessage>>,
+    render_refs: bool,
+) -> Vec<ChatContextMessage> {
+    let mut messages = match folded {
+        Some(folded) => folded,
+        None => view.messages.clone(),
+    };
+    if !render_refs {
+        return messages;
+    }
+    // 折叠后的视图与原始下标不再一一对应，按内容指纹重新匹配引用。
+    let mut occurrences: HashMap<String, usize> = HashMap::new();
+    let mut lookup: HashMap<String, String> = HashMap::new();
+    for message in view.messages.iter() {
+        let id = message_id(message, &mut occurrences);
+        lookup.insert(fingerprint(message), id);
+    }
+    for message in messages.iter_mut() {
+        if !matches!(message.role.trim(), "user" | "assistant") {
+            continue;
+        }
+        if message.origin == ORIGIN_INTERNAL || message.content.trim().is_empty() {
+            continue;
+        }
+        let Some(id) = lookup.get(&fingerprint(message)) else {
+            continue;
+        };
+        let prefix = format!("[{id}] ");
+        if !message.content.starts_with(&prefix) {
+            message.content = format!("{prefix}{}", message.content);
+        }
+    }
+    messages
+}
+
+/// 用于 ref 匹配的稳定指纹（角色 + 正文 + 工具负载）。
+fn fingerprint(message: &ChatContextMessage) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(message.role.trim().as_bytes());
+    hasher.update(b"\x1f");
+    hasher.update(message.content.as_bytes());
+    if let Some(raw) = message.tool_calls_json.as_deref() {
+        hasher.update(b"\x1f");
+        hasher.update(raw.as_bytes());
+    }
+    if let Some(raw) = message.tool_results_json.as_deref() {
+        hasher.update(b"\x1f");
+        hasher.update(raw.as_bytes());
+    }
+    hasher.finalize().to_hex().to_string()
 }
 
 /// 出站视图入口：验证块、折叠历史、必要时追加 nudge。
@@ -778,7 +1372,7 @@ pub fn apply_outgoing_view(
     let positions = HistoryView::build(messages.clone()).positions;
     let mut changed = prune_stale_blocks(&mut state, &positions);
 
-    let (mut folded, mut tokens) = fold(messages, &state);
+    let (mut folded, mut tokens) = fold(messages, &state, RENDER_REFS);
     // CCR：超长工具结果在出站视图里换成冻结占位符，原文进入 content store。
     if apply_ccr(&mut folded, &mut state) > 0 {
         changed = true;
@@ -798,7 +1392,12 @@ pub fn apply_outgoing_view(
                 .map(|block| block.tier)
                 .max()
                 .unwrap_or(0);
-            folded.push(nudge_message(effective, threshold, highest_tier));
+            folded.push(nudge_message(
+                effective,
+                threshold,
+                highest_tier,
+                &state.rules,
+            ));
         }
     }
     *messages = folded;
@@ -853,6 +1452,41 @@ fn execute_compress(
     sub_agent_id: &str,
     args: &Value,
 ) -> Result<Value> {
+    compress_range(
+        database_path,
+        conversation_id,
+        sub_agent_id,
+        args,
+        "compress",
+    )
+}
+
+/// `context-kernel-absorb`: 把「已经完成的工作」折叠成一条 absorbed 块。
+/// 机制与 compress 相同，但摘要必须以完成态陈述（done / verified / 产物），
+/// 便于后续轮次直接信任而不重新验证。
+fn execute_absorb(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    args: &Value,
+) -> Result<Value> {
+    compress_range(
+        database_path,
+        conversation_id,
+        sub_agent_id,
+        args,
+        "absorb",
+    )
+}
+
+/// 折叠核心：`kind` 区分普通压缩与 absorb（写进块标记与折叠日志）。
+fn compress_range(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    args: &Value,
+    kind: &str,
+) -> Result<Value> {
     let from = identifier_arg(args, "from")?;
     let to = identifier_arg(args, "to")?;
     let summary = args
@@ -867,12 +1501,18 @@ fn execute_compress(
             )
         })?
         .to_string();
+    let absorbed = kind == "absorb";
+    let default_title = if absorbed {
+        "absorbed completed work"
+    } else {
+        "compressed history"
+    };
     let title = args
         .get("title")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("compressed history")
+        .unwrap_or(default_title)
         .to_string();
 
     let messages = load_history(database_path, conversation_id)?;
@@ -894,6 +1534,8 @@ fn execute_compress(
     } else {
         (to_index, from_index)
     };
+    // 按轮对齐：范围向外扩张到完整的轮，避免把一次交互切成两半。
+    let (start, end, snapped) = expand_to_turn_bounds(&view.messages, start, end);
     let span = end - start + 1;
     if span < MIN_COMPRESS_MESSAGES {
         return Err(Error::new(
@@ -1010,7 +1652,7 @@ fn execute_compress(
             entry.folded_into = id.clone();
         }
     }
-    let block = KernelBlock {
+    let mut placeholder = KernelBlock {
         id: id.clone(),
         title,
         summary,
@@ -1018,18 +1660,31 @@ fn execute_compress(
         tier,
         children: children.iter().map(|child| child.id.clone()).collect(),
         folded_into: String::new(),
+        tokens_before,
+        tokens_after: 0,
+        absorbed,
         created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
+    placeholder.tokens_after = estimate_message_tokens(&summary_message(&placeholder, target_ids.len()));
+    let block = placeholder;
+    let summary_tokens = block.tokens_after;
     state.blocks.push(block.clone());
     state.updated_at = block.created_at.clone();
     save_state(database_path, conversation_id, sub_agent_id, &state)?;
-
-    let summary_tokens = estimate_message_tokens(&summary_message(&block, target_ids.len()));
+    // 折叠日志：先写被合并的子块，再写父块，保证重放顺序确定。
+    for child in children.iter() {
+        journal_append(database_path, conversation_id, sub_agent_id, "merge", child, &id);
+    }
+    let fold_event = if absorbed { "absorb" } else { "fold" };
+    journal_append(database_path, conversation_id, sub_agent_id, fold_event, &block, "");
     Ok(json!({
         "success": true,
         "blockId": id,
+        "kind": kind,
+        "absorbed": absorbed,
         "tier": tier,
         "mergedBlocks": child_ids,
+        "snappedToTurns": snapped,
         "coveredMessages": target_ids.len(),
         "tokensBefore": tokens_before,
         "tokensAfter": summary_tokens,
@@ -1080,6 +1735,14 @@ fn execute_decompress(
     }
     state.updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     save_state(database_path, conversation_id, sub_agent_id, &state)?;
+    journal_append(
+        database_path,
+        conversation_id,
+        sub_agent_id,
+        "decompress",
+        &block,
+        "",
+    );
     let active_top = state
         .blocks
         .iter()
@@ -1181,6 +1844,187 @@ fn execute_search(
     }))
 }
 
+/// `context-kernel-acp_rule`: 折叠规则的增删查（作为压缩约束注入 nudge）。
+fn execute_rule(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    args: &Value,
+) -> Result<Value> {
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+    let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
+    let mut changed = false;
+    match action.as_str() {
+        "list" => {}
+        "add" => {
+            let raw = args
+                .get("rule")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    Error::new(
+                        Status::InvalidArg,
+                        "Missing required parameter: rule (the constraint text to remember)",
+                    )
+                })?;
+            let rule = truncate_chars(raw, MAX_RULE_CHARS);
+            if !state.rules.iter().any(|existing| existing == &rule) {
+                if state.rules.len() >= MAX_RULES {
+                    return Err(Error::new(
+                        Status::InvalidArg,
+                        format!("At most {MAX_RULES} folding rules; remove one first."),
+                    ));
+                }
+                state.rules.push(rule);
+                changed = true;
+            }
+        }
+        "remove" => {
+            let rule_arg = args
+                .get("rule")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let index_arg = args
+                .get("index")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+            let removed = if let Some(rule) = rule_arg {
+                let before = state.rules.len();
+                state.rules.retain(|existing| existing != rule);
+                before - state.rules.len()
+            } else if let Some(index) = index_arg {
+                if index < state.rules.len() {
+                    state.rules.remove(index);
+                    1
+                } else {
+                    0
+                }
+            } else {
+                return Err(Error::new(
+                    Status::InvalidArg,
+                    "action=remove needs either `rule` (exact text) or `index` (from action=list).",
+                ));
+            };
+            if removed == 0 {
+                return Err(Error::new(
+                    Status::InvalidArg,
+                    "No matching folding rule found; call action=list for the current list.",
+                ));
+            }
+            changed = true;
+        }
+        other => {
+            return Err(Error::new(
+                Status::InvalidArg,
+                format!("Unknown action: {other} (list | add | remove)"),
+            ))
+        }
+    }
+    if changed {
+        state.updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        save_state(database_path, conversation_id, sub_agent_id, &state)?;
+    }
+    Ok(json!({
+        "success": true,
+        "action": action,
+        "count": state.rules.len(),
+        "maxRules": MAX_RULES,
+        "rules": state.rules,
+    }))
+}
+
+/// `context-kernel-acp_cache`: 折叠经济学报告（省了多少、按层分布、CCR 占比）。
+fn execute_cache(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    threshold_tokens: Option<i64>,
+    args: &Value,
+) -> Result<Value> {
+    let include_blocks = args
+        .get("includeBlocks")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let messages = load_history(database_path, conversation_id)?;
+    let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
+    let view = HistoryView::build(messages);
+    prune_stale_blocks(&mut state, &view.positions);
+    let (folded, folded_tokens) = fold(&view.messages, &state, RENDER_REFS);
+    let mut preview = folded.clone();
+    let mut state_preview = state.clone();
+    let outbound_tokens = if apply_ccr(&mut preview, &mut state_preview) > 0 {
+        preview.iter().map(estimate_message_tokens).sum()
+    } else {
+        folded_tokens
+    };
+    let top: Vec<&KernelBlock> = state
+        .blocks
+        .iter()
+        .filter(|block| block.folded_into.is_empty())
+        .collect();
+    let saved_by_folding: i64 = top
+        .iter()
+        .map(|block| (block.tokens_before - block.tokens_after).max(0))
+        .sum();
+    let mut tier_breakdown = [0usize; (MAX_TIER + 1) as usize];
+    for block in top.iter() {
+        let index = usize::from(block.tier.min(MAX_TIER));
+        tier_breakdown[index] += 1;
+    }
+    let raw_tokens = view.total_tokens();
+    let ratio = if raw_tokens > 0 {
+        ((outbound_tokens as f64 / raw_tokens as f64) * 100.0).round() / 100.0
+    } else {
+        1.0
+    };
+    let blocks_json: Vec<Value> = if include_blocks {
+        top.iter()
+            .map(|block| {
+                json!({
+                    "blockId": block.id,
+                    "tier": block.tier,
+                    "children": block.children,
+                    "coveredMessages": block.message_ids.len(),
+                    "tokensBefore": block.tokens_before,
+                    "tokensAfter": block.tokens_after,
+                    "tokensSaved": (block.tokens_before - block.tokens_after).max(0),
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(json!({
+        "success": true,
+        "conversationId": conversation_id,
+        "rawTokens": raw_tokens,
+        "outboundTokens": outbound_tokens,
+        "tokensSavedByFolding": saved_by_folding,
+        "tokensSavedTotal": (raw_tokens - outbound_tokens).max(0),
+        "compressionRatio": ratio,
+        "observedTokens": latest_usage_tokens(database_path, conversation_id),
+        "thresholdTokens": threshold_tokens.filter(|value| *value > 0),
+        "activeBlocks": top.len(),
+        "highestTier": top.iter().map(|block| block.tier).max().unwrap_or(0),
+        "maxTier": MAX_TIER,
+        "tierBreakdown": {
+            "tier1": tier_breakdown[1],
+            "tier2": tier_breakdown.get(2).copied().unwrap_or(0),
+            "tier3": tier_breakdown.get(3).copied().unwrap_or(0),
+        },
+        "storedEntries": state.store.len(),
+        "storedChars": state.stored_chars(),
+        "blocks": blocks_json,
+    }))
+}
+
 /// `context-kernel-acp_status`: 报告出站用量、阈值、块与可用 ref。
 fn execute_status(
     database_path: &Path,
@@ -1198,18 +2042,41 @@ fn execute_status(
     let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
     let view = HistoryView::build(messages);
     prune_stale_blocks(&mut state, &view.positions);
-    let (folded, folded_tokens) = fold(&view.messages, &state);
-    // 状态里的 token 估算同样要反映 CCR 占位符（但不写回 store）。
-    let mut folded_preview = folded.clone();
-    let mut state_preview = state.clone();
-    let folded_tokens = if apply_ccr(&mut folded_preview, &mut state_preview) > 0 {
-        folded_preview.iter().map(estimate_message_tokens).sum()
-    } else {
-        folded_tokens
-    };
+    let (mut folded, mut folded_tokens) = fold(&view.messages, &state, RENDER_REFS);
+    // 状态里的 token 估算与出站预览都必须是「真实出站字节」：就地应用 CCR/crush。
+    if apply_ccr(&mut folded, &mut state) > 0 {
+        folded_tokens = folded.iter().map(estimate_message_tokens).sum();
+    }
     let covered = covered_lookup(&state);
     let tail_from = view.tail_protected_from();
     let pinned = view.pinned_index();
+    // 出站预览：折叠 + ref 渲染 + CCR/crush + 隐藏已消费调用之后的真实前几行，
+    // 既给 UI 用，也让“出站字节到底长什么样”可被验证。
+    let outbound_preview: Vec<Value> = folded
+        .iter()
+        .take(16)
+        .map(|message| {
+            json!({
+                "role": message.role,
+                "origin": message.origin,
+                "tokens": estimate_message_tokens(message),
+                "head": preview_of(&message.content, 160),
+            })
+        })
+        .collect();
+    // 建议区间：按轮对齐、排除受保护消息、体量达标，模型可以直接照抄。
+    let suggested_json: Vec<Value> = viable_ranges(&view, &state)
+        .into_iter()
+        .map(|(from, to)| {
+            json!({
+                "from": view.refs[from].id,
+                "to": view.refs[to].id,
+                "turns": turns_in_range(&view.messages, from, to),
+                "messages": to - from + 1,
+                "tokens": view.refs[from..=to].iter().map(|item| item.tokens).sum::<i64>(),
+            })
+        })
+        .collect();
 
     let refs_json: Vec<Value> = view
         .refs
@@ -1247,6 +2114,9 @@ fn execute_status(
                 "children": block.children,
                 "coveredMessages": block.message_ids.len(),
                 "summaryTokens": estimate_message_tokens(&summary_message(block, block.message_ids.len())),
+                "tokensBefore": block.tokens_before,
+                "tokensAfter": block.tokens_after,
+                "tokensSaved": (block.tokens_before - block.tokens_after).max(0),
                 "createdAt": block.created_at,
             })
         })
@@ -1261,6 +2131,10 @@ fn execute_status(
 
     let threshold = threshold_tokens.filter(|value| *value > 0);
     let observed = latest_usage_tokens(database_path, conversation_id);
+    let tokens_saved_by_folding: i64 = blocks_json
+        .iter()
+        .map(|block| block.get("tokensSaved").and_then(Value::as_i64).unwrap_or(0))
+        .sum();
     Ok(json!({
         "success": true,
         "kernelVersion": KERNEL_VERSION,
@@ -1271,6 +2145,7 @@ fn execute_status(
         "estimatedTokens": folded_tokens,
         "observedTokens": observed,
         "rawTokens": view.total_tokens(),
+        "tokensSavedByFolding": tokens_saved_by_folding,
         "thresholdTokens": threshold,
         "compressNeeded": threshold.map(|value| folded_tokens.max(observed.unwrap_or(0)) >= value).unwrap_or(false),
         "compressedMessages": covered.len(),
@@ -1279,7 +2154,15 @@ fn execute_status(
         "maxTier": MAX_TIER,
         "storedEntries": state.store.len(),
         "storedChars": state.stored_chars(),
+        "rules": state.rules,
+        "absorbedBlocks": state
+            .blocks
+            .iter()
+            .filter(|block| block.folded_into.is_empty() && block.absorbed)
+            .count(),
         "blocks": blocks_json,
+        "suggestedRanges": suggested_json,
+        "outboundPreview": outbound_preview,
         "refs": refs_json,
         "protected": {
             "pinnedRef": pinned.and_then(|index| view.refs.get(index)).map(|item| item.id.clone()).unwrap_or_default(),
@@ -1301,9 +2184,18 @@ pub fn execute_tool(
 ) -> Result<Value> {
     match tool_name {
         "compress" => execute_compress(database_path, conversation_id, sub_agent_id, args),
+        "absorb" => execute_absorb(database_path, conversation_id, sub_agent_id, args),
+        "acp_rule" => execute_rule(database_path, conversation_id, sub_agent_id, args),
         "decompress" => execute_decompress(database_path, conversation_id, sub_agent_id, args),
         "retrieve" => execute_retrieve(database_path, conversation_id, sub_agent_id, args),
         "search_context" => execute_search(database_path, conversation_id, sub_agent_id, args),
+        "acp_cache" => execute_cache(
+            database_path,
+            conversation_id,
+            sub_agent_id,
+            threshold_tokens,
+            args,
+        ),
         "acp_status" => execute_status(
             database_path,
             conversation_id,
