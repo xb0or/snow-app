@@ -36,6 +36,7 @@ pub mod absorb;
 pub mod analytics;
 pub mod content;
 pub mod image;
+pub mod lifecycle;
 pub mod porting;
 pub mod protection;
 pub mod refs;
@@ -522,6 +523,10 @@ pub struct KernelState {
     pub version: String,
     pub blocks: Vec<KernelBlock>,
     pub next_block_id: u64,
+    /// 运行 id 计数器（`allocateRunId`）。
+    pub next_run_id: u64,
+    /// 稳定渲染 token 快照：ref → token 数，首次渲染写入后永久复用。
+    pub token_snapshot: BTreeMap<String, i64>,
     pub updated_at: String,
     /// CCR content store：`cr<hash>` → 原始工具结果。占位符一旦生成即冻结，
     /// 后续轮次重新计算出同样的占位字节，前缀缓存不受影响。
@@ -545,6 +550,8 @@ impl KernelState {
             version: KERNEL_VERSION.to_string(),
             blocks: Vec::new(),
             next_block_id: 1,
+            next_run_id: 1,
+            token_snapshot: BTreeMap::new(),
             updated_at: String::new(),
             store: BTreeMap::new(),
             rules: Vec::new(),
@@ -1875,7 +1882,13 @@ pub fn apply_outgoing_view(
     let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
     let cfg = resolve_config();
     let positions = HistoryView::build(messages.clone()).positions;
-    let mut changed = prune_stale_blocks(&mut state, &positions);
+    // 上游 `syncBlocks`：覆盖消息已消失的块作废，并把成了孤儿的子块放回活动集。
+    let visible: HashSet<String> = positions.keys().cloned().collect();
+    let deactivated = lifecycle::sync_blocks(&mut state, &visible);
+    let mut changed = !deactivated.is_empty() || prune_stale_blocks(&mut state, &positions);
+    // 上游 `advanceSurvival`（生存计数 → 晋升）由宿主在「轮结束」时调用
+    //（`lifecycle::advance_survival`）；出站视图每请求都会跑，这里不写库以避免
+    // 每请求一次的写放大。
 
     let (mut folded, mut tokens) = fold(messages, &state, &cfg);
     // CCR：超长工具结果在出站视图里换成冻结占位符，原文进入 content store。
