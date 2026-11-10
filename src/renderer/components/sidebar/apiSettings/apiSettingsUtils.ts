@@ -288,6 +288,7 @@ export function apiConfigToForm(config: ApiConfigRecord): ApiConfigFormData {
         ? String(config.streamIdleTimeoutSec)
         : "",
     enableAutoCompress: config.enableAutoCompress ?? true,
+    contextKernelEnabled: config.contextKernelEnabled ?? false,
     autoCompressThreshold: calculateAutoCompressThresholdPercent(
       config.maxContextTokens,
       config.autoCompressThreshold,
@@ -403,6 +404,7 @@ export const emptyApiConfigForm = (
   maxTokens: "",
   streamIdleTimeoutSec: "",
   enableAutoCompress: true,
+  contextKernelEnabled: false,
   autoCompressThreshold: String(DEFAULT_AUTO_COMPRESS_THRESHOLD_PERCENT),
   toolResultTokenLimit: String(DEFAULT_TOOL_RESULT_LIMIT_PERCENT),
   maxRetries: "5",
@@ -521,6 +523,7 @@ export function toApiConfigPayload(
     maxTokens: parseOptionalInteger(data.maxTokens),
     streamIdleTimeoutSec: parseOptionalInteger(data.streamIdleTimeoutSec),
     enableAutoCompress: data.enableAutoCompress,
+    contextKernelEnabled: data.contextKernelEnabled,
     autoCompressThreshold: autoCompressThresholdTokens,
     maxRetries: parseOptionalInteger(data.maxRetries),
     retryBaseDelayMs: parseOptionalInteger(data.retryBaseDelayMs),

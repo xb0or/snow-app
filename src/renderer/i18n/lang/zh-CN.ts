@@ -2572,6 +2572,9 @@ export const zhCN = {
   "settings.apiAutoCompressThresholdNeedMaxContext":
     "请先填写最大上下文，用于计算 token 阈值。",
   "settings.apiAutoCompressThresholdCalculated": "计算阈值：{tokens} tokens",
+  "settings.apiContextKernel": "上下文内核（增量折叠）",
+  "settings.apiContextKernelHint":
+    "用模型驱动的增量折叠替代一次性 handoff，只裁剪发给模型的消息视图，历史与界面显示不变。默认关闭。",
   "settings.active": "启用",
   "settings.inactive": "未启用",
   "settings.activeProfile": "已启用配置",

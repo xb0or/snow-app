@@ -4,6 +4,7 @@ use crate::storage::services::chat_conversations::ChatContextMessage;
 
 pub mod context;
 mod history_trim;
+pub mod context_kernel;
 pub mod image_optimize;
 pub mod images;
 pub mod stream;
@@ -65,6 +66,13 @@ pub struct ConversationContextRequest<'a> {
     /// contents and injected as leading `system` messages, mirroring
     /// Snow CLI's `getCustomSystemPromptForConfig`.
     pub system_prompt_ids_json: &'a str,
+    /// 上下文内核开关（来自当前 API 档案的 `contextKernelEnabled`）。关闭时
+    /// 请求载荷与本特性引入前完全一致；开启后出站历史按下文折叠。
+    pub context_kernel: bool,
+    /// 自动压缩阈值（token），与渲染层共用同一个 `autoCompressThreshold`。
+    pub auto_compress_threshold: Option<i32>,
+    /// 档案配置的上下文窗口大小，用于推算默认折叠阈值。
+    pub max_context_tokens: Option<i32>,
     /// Project ROLE.md content for an SSH (`ssh://`) workspace, injected by
     /// the Electron main process (Rust cannot perform SSH I/O). `None` for
     /// local workspaces, where the prompt builder reads the file directly.

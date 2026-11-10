@@ -36,6 +36,7 @@ export const toApiConfigInput = (profile: SnowCliProfile): ApiConfigInput => {
       toIntegerOrNull(snowcfg.streamIdleTimeoutSec) ?? undefined,
     enableAutoCompress: toBoolean(snowcfg.enableAutoCompress, true),
     autoCompressThreshold: autoCompressThreshold ?? undefined,
+    contextKernelEnabled: toBoolean(snowcfg.contextKernelEnabled, false),
     maxRetries: toIntegerOrNull(snowcfg.maxRetries) ?? undefined,
     retryBaseDelayMs: toIntegerOrNull(snowcfg.retryDelayMs) ?? undefined,
     partialRetryMaxChars: toIntegerOrNull(snowcfg.partialRetryMaxChars) ?? undefined,
@@ -99,6 +100,7 @@ export const normalizeApiConfigInput = (value: unknown): ApiConfigInput => {
       enableAutoCompress: toBoolean(value.enableAutoCompress, true),
       autoCompressThreshold:
         toIntegerOrNull(value.autoCompressThreshold) ?? undefined,
+      contextKernelEnabled: toBoolean(value.contextKernelEnabled, false),
       source,
     },
   };
@@ -127,6 +129,7 @@ export const normalizeApiConfigInput = (value: unknown): ApiConfigInput => {
     enableAutoCompress: toBoolean(value.enableAutoCompress, true),
     autoCompressThreshold:
       toIntegerOrNull(value.autoCompressThreshold) ?? undefined,
+    contextKernelEnabled: toBoolean(value.contextKernelEnabled, false),
     maxRetries: toIntegerOrNull(value.maxRetries) ?? undefined,
     retryBaseDelayMs: toIntegerOrNull(value.retryBaseDelayMs) ?? undefined,
     partialRetryMaxChars: toIntegerOrNull(value.partialRetryMaxChars) ?? undefined,

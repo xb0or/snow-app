@@ -2721,6 +2721,9 @@ export const en = {
     "Set max context first to calculate the token threshold.",
   "settings.apiAutoCompressThresholdCalculated":
     "Calculated threshold: {tokens} tokens",
+  "settings.apiContextKernel": "Context kernel (incremental folding)",
+  "settings.apiContextKernelHint":
+    "Replaces one-shot auto handoffs with model-driven incremental folding of the outbound view. Stored history and the UI keep every message. Off by default.",
   "settings.active": "Enabled",
   "settings.inactive": "Not enabled",
   "settings.activeProfile": "Enabled profile",

@@ -112,6 +112,7 @@ pub fn run_post_schema_migrations(connection: &Connection) -> rusqlite::Result<(
     migrate_file_review_annotations(connection)?;
     migrate_team_join_approval(connection)?;
     migrate_team_host_member(connection)?;
+    migrate_context_kernel_state(connection)?;
     // 模型注册表：旧 system_settings JSON / 自检快照与代码库内联字段迁入模型表
     // （幂等，已迁移时为空操作；表由 create_schema 提前建好）。
     super::services::model_registry::migrate_legacy_model_settings(connection)?;
@@ -215,6 +216,25 @@ fn migrate_team_host_member(connection: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
     Ok(())
+}
+
+/// Additive and idempotent: context kernel folding state for databases created
+/// before the table existed. Fresh databases get it from `CREATE TABLE`.
+fn migrate_context_kernel_state(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS context_kernel_state (
+           conversation_id TEXT NOT NULL,
+           sub_agent_id TEXT NOT NULL DEFAULT '',
+           kernel_version TEXT NOT NULL,
+           state_json TEXT NOT NULL,
+           store_json TEXT NOT NULL DEFAULT '{}',
+           updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+           PRIMARY KEY (conversation_id, sub_agent_id),
+           FOREIGN KEY(conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE
+         );
+         CREATE INDEX IF NOT EXISTS idx_context_kernel_state_updated
+           ON context_kernel_state(updated_at);",
+    )
 }
 
 /// Additive and idempotent: existing Diff comments and source files are untouched.

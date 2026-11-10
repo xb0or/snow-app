@@ -762,6 +762,50 @@ flowchart TD
     I -- 否 --> K[删除本次临时 checkpoint]
 ```
 
+### 10.1 上下文内核（增量折叠）
+
+API 档案开启 `contextKernelEnabled` 后，常规对话不再依赖一次性 handoff，而是由模型
+按 nudge 主动把旧消息折叠成块（block）。完整历史仍写入 `chat_messages`，界面展示
+不变，只有 `prepare_context_request` 产出的**出站视图**被裁剪。
+
+- 插入点：`native/src/api/conversation/context.rs`，在工具配对修复与
+  `trim_history_for_request` 之后、provider 编 payload 之前，五条 provider 线共用。
+- 跳过路径：ephemeral、`skip_context`、旧 handoff（`contextCompaction` /
+  `resumeAfterCompaction`）。渲染层在主对话循环开启内核时不再触发常规自动 handoff，
+  子代理与 WorkFlow 节点继续走各自的专用 handoff，避免同一轮双重压缩。
+- 消息引用：`m` + 内容哈希（角色 + 正文 + 工具调用/结果 + thinking）。回滚截断、
+  fork、重试后引用仍然稳定；块引用的消息不存在时块自动失效。
+- 出站视图：块的首条消息位置插入一条**字节稳定**的摘要消息，块内其余消息被剪掉；
+  首条非系统消息永久 pin，最近 6 条消息受保护。
+- 状态：`context_kernel_state(conversation_id, sub_agent_id, kernel_version,
+state_json, store_json, updated_at)`，按会话 + 子代理隔离，随会话级联删除。
+- 阈值：复用 `autoCompressThreshold`（未配置时取 `maxContextTokens` 的 60%）。
+  估算 token 达到阈值时在出站尾部追加 nudge，提示模型先查 ref 再压缩；nudge
+  只存在于出站视图，不落库。
+- 工具：`context-kernel-acp_status` / `compress` / `decompress` / `search_context`，
+  全部只读免审批；工具执行前后经 `call_mcp_tool` 注入当前会话，模型无法跨会话操作。
+- 关闭时（默认）：工具从载荷中过滤、折叠逻辑完全不执行，请求与本特性引入前一致。
+
+```mermaid
+flowchart TD
+    A[prepare_context_request] --> B{contextKernel 开启?}
+    B -- 否 --> Z[原样返回规范历史]
+    B -- 是 --> C{ephemeral / skip_context / 旧 handoff?}
+    C -- 是 --> Z
+    C -- 否 --> D[读取/校验 context_kernel_state]
+    D --> E{块引用的消息仍存在?}
+    E -- 否 --> E1[丢弃失效块]
+    E -- 是 --> F[按块替换为摘要消息<br/>pin 首条 + 保护尾部]
+    E1 --> F
+    F --> G{估算 token ≥ 阈值?}
+    G -- 是 --> H[出站尾部追加 nudge]
+    G -- 否 --> I[返回折叠视图]
+    H --> I
+```
+
+> 来源：[ranxianglei/billion-context](https://github.com/ranxianglei/billion-context)
+> 的 `acp-kernel`（MIT）。此处是其内核语义在 Snow 原生层的适配实现。
+
 ## 11. 回滚
 
 `useRollback.ts` 先 abort 当前流并取消 summary generation，计算 checkpoint diff 和将删除的 TODO，展示预览。确认后等待流与 summary Promise 完全结束，避免和 SQLite 写事务竞态。用户可选择只截断对话，或同时调用 `restoreCheckpoint` 恢复文件。

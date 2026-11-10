@@ -63,6 +63,9 @@ Snow App 通过 **API 档案（Profile）** 管理模型服务商的接入信息
   可选"继承全局"或"不使用"；
 - **自动压缩**：开启 `enableAutoCompress` 后，当上下文用量达到阈值
   `autoCompressThreshold`（百分比）时自动压缩历史消息；
+- **上下文内核**：开启 `contextKernelEnabled` 后，常规对话改由模型按内核 nudge
+  把旧消息折叠成块（可检索、可还原），只裁剪发给模型的消息视图；旧的自动
+  handoff 在常规对话中停用。完整历史与界面显示不变，默认关闭；
 - **1M 上下文（Anthropic）**：当请求方法为 `anthropic` 时，可开启 **1M context**
   开关，开启后所有 Anthropic 请求自动携带 `anthropic-beta: context-1m-2025-08-07`
   请求头，声明 100 万上下文能力，供 Anthropic 官方 API 及要求显式启用 1M

@@ -10,6 +10,7 @@ use super::servers::browser::BrowserService;
 use super::servers::codebase::CodebaseService;
 use super::servers::computer_use::ComputerUseService;
 use super::servers::config::ConfigService;
+use super::servers::context_kernel::ContextKernelService;
 use super::servers::decision::DecisionService;
 use super::servers::filesystem::FilesystemService;
 use super::servers::grep::GrepService;
@@ -56,6 +57,9 @@ fn builtin_services_in_order() -> Vec<Arc<dyn McpService>> {
         // 工具搜索：插件工具默认不进请求，由它按需返完整定义（追加在末尾以
         // 保持既有工具顺序稳定，prompt cache 不受影响）。
         Arc::new(ToolSearchService::new()),
+        // 上下文内核（billion-context 增量折叠）：工具由 API 档案的
+        // contextKernelEnabled 开关在请求层过滤，关闭时不出现在载荷里。
+        Arc::new(ContextKernelService::new()),
         // Snow App logs are read through config-manage (action=logs); no separate MCP server.
         // NOTE: new services must be appended to the END of this list to keep
         // the tool order stable (prompt cache); never insert in the middle.
@@ -116,6 +120,11 @@ pub const READONLY_TOOL_NAMES: &[&str] = &[
     "computer-use-screen",
     "html-render",
     "toolSearch-tool-search",
+    // 上下文内核：只改出站视图状态（压缩块），不写工作区，全部免审批。
+    "context-kernel-compress",
+    "context-kernel-decompress",
+    "context-kernel-search_context",
+    "context-kernel-acp_status",
 ];
 
 /// 返回仍注册在案的只读工具全名（过滤掉已删除/改名工具的过期条目）。

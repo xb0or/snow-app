@@ -452,6 +452,8 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
         // 子代理严格绑定自身 Profile，找不到时不回落全局活动档案。
         apiProfile: runtimeConfig.apiProfile,
         strictProfile: true,
+        // 子代理继续使用专用 handoff：内核工具不在子代理白名单内。
+        contextKernelHandlesCompaction: false,
         subAgentToolsJson: runtimeConfig.toolsJson,
         subAgentSystemPrompt: runtimeConfig.systemPrompt || undefined,
         thinkingStrength: runtimeConfig.effectiveThinkingStrength,
@@ -770,6 +772,7 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
           model: runtimeConfig.model,
           apiProfile: runtimeConfig.apiProfile,
           strictProfile: true,
+          contextKernelHandlesCompaction: false,
           subAgentToolsJson: runtimeConfig.toolsJson,
           subAgentSystemPrompt: runtimeConfig.systemPrompt || undefined,
           thinkingStrength: runtimeConfig.effectiveThinkingStrength,

@@ -21,6 +21,8 @@ export type ApiConfigInput = {
   streamIdleTimeoutSec?: number | null;
   enableAutoCompress: boolean;
   autoCompressThreshold?: number | null;
+  /** 上下文内核（billion-context 增量折叠）开关；默认关闭。 */
+  contextKernelEnabled?: boolean;
   maxRetries?: number | null;
   retryBaseDelayMs?: number | null;
   partialRetryMaxChars?: number | null;

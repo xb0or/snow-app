@@ -91,6 +91,13 @@ async fn create_interactions_response_async(
     )
     .await?;
     let allowed_tools = resolve_request_tools_optional(&request).await?;
+    // 上下文内核工具只在 API 档案开启时进入请求载荷（关闭时载荷与引入前一致）。
+    let allowed_tools = allowed_tools.map(|tools| {
+        crate::api::conversation::context_kernel::filter_tools(
+            tools,
+            api_config.context_kernel_enabled,
+        )
+    });
     let prepared_request = prepare_context_request(ConversationContextRequest {
         allowed_tools: allowed_tools.as_deref().unwrap_or_default(),
         database_path: &database_path,
@@ -109,6 +116,9 @@ async fn create_interactions_response_async(
         is_sub_agent: request.is_sub_agent_request(),
         sub_agent_system_prompt: request.sub_agent_system_prompt.as_deref(),
         system_prompt_ids_json: &api_config.system_prompt_ids_json,
+        context_kernel: api_config.context_kernel_enabled,
+        auto_compress_threshold: api_config.auto_compress_threshold,
+        max_context_tokens: api_config.max_context_tokens,
         remote_role_content: request.remote_role_content.as_deref(),
         remote_include_global_rules: request.remote_include_global_rules,
         remote_override_builtin_prompt: request.remote_override_builtin_prompt,

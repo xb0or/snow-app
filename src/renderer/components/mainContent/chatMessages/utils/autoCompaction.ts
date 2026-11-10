@@ -39,6 +39,11 @@ export type AutoCompactionGateParams = {
   tokenUsage?: TokenUsage | null;
   /** 压缩边界续跑（resumeAfterCompaction=true）不再重复压缩。 */
   resumeAfterCompaction?: boolean;
+  /**
+   * 该调用方是否由上下文内核接管常规压缩（默认 true，主对话循环）。
+   * 子代理 / Workflow 节点传 false：它们继续走旧的专用 handoff。
+   */
+  contextKernelHandlesCompaction?: boolean;
   /** 压缩确定要发生、真正开始之前调用（调用方用它固化本轮消息）。 */
   beforeCompaction?: () => void;
 };
@@ -140,6 +145,13 @@ export const runAutoCompactionGate = async (
     ? await resolveStrictProfileApiConfig(params.apiProfile)
     : await ctx.getActiveApiConfig(params.apiProfile);
   if (!apiConfig?.enableAutoCompress) return null;
+  // 上下文内核开启时常规对话改走内核增量折叠，不再生成一次性自动 handoff
+  // （同一轮既折叠又 handoff 会双重压缩）。内核不可用的调用方继续走旧路径。
+  if (
+    params.contextKernelHandlesCompaction !== false &&
+    apiConfig.contextKernelEnabled
+  )
+    return null;
   // autoCompressThreshold 存的是 token 数（保存配置时按百分比换算），
   // 直接与会话用量比较 —— 不要再走 calculateAutoCompressThresholdTokens。
   const thresholdTokens = apiConfig.autoCompressThreshold;

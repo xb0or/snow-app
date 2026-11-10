@@ -169,6 +169,8 @@ pub struct ApiConfigInput {
     pub stream_idle_timeout_sec: Option<i32>,
     pub enable_auto_compress: bool,
     pub auto_compress_threshold: Option<i32>,
+    /// 上下文内核（billion-context 增量折叠）开关，默认关闭。
+    pub context_kernel_enabled: bool,
     pub max_retries: Option<i32>,
     pub retry_base_delay_ms: Option<i32>,
     pub partial_retry_max_chars: Option<i32>,
@@ -201,6 +203,8 @@ pub struct ApiConfigRecord {
     pub stream_idle_timeout_sec: Option<i32>,
     pub enable_auto_compress: bool,
     pub auto_compress_threshold: Option<i32>,
+    /// 上下文内核（billion-context 增量折叠）开关，默认关闭。
+    pub context_kernel_enabled: bool,
     pub max_retries: Option<i32>,
     pub retry_base_delay_ms: Option<i32>,
     pub partial_retry_max_chars: Option<i32>,

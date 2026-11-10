@@ -2014,6 +2014,8 @@ export function createWorkflowRunner(
             thinkingStrength,
             responsesFastMode,
             resumeAfterCompaction,
+            // Workflow 节点继续使用专用 handoff。
+            contextKernelHandlesCompaction: false,
           });
           if (gateCompaction) {
             if (isNodeCancelled()) {
@@ -2243,6 +2245,7 @@ export function createWorkflowRunner(
               thinkingStrength,
               responsesFastMode,
               tokenUsage: response.tokenUsage,
+              contextKernelHandlesCompaction: false,
               // 固化跨阈值轮次的消息，其工具调用被压缩交接放弃。
               beforeCompaction: () =>
                 finalizeMessage(assistantMessageId, {

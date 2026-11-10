@@ -188,6 +188,7 @@ fn default_config_json() -> String {
             "streamIdleTimeoutSec": null,
             "enableAutoCompress": true,
             "autoCompressThreshold": null,
+            "contextKernelEnabled": false,
             "maxRetries": 5,
             "retryDelayMs": null,
             "partialRetryMaxChars": 1000,
@@ -297,6 +298,7 @@ fn record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiConfigRecord>
             legacy.enable_auto_compress,
         ),
         auto_compress_threshold: snowcfg_i32(&config_json, "autoCompressThreshold"),
+        context_kernel_enabled: snowcfg_bool(&config_json, "contextKernelEnabled", false),
         max_retries: snowcfg_i32(&config_json, "maxRetries"),
         retry_base_delay_ms: snowcfg_i32(&config_json, "retryDelayMs"),
         partial_retry_max_chars: snowcfg_i32(&config_json, "partialRetryMaxChars"),
@@ -553,6 +555,10 @@ pub fn upsert_api_config(database_path: &Path, config: &ApiConfigInput) -> Resul
                 &mut *snowcfg,
                 "autoCompressThreshold",
                 effective_auto_compress_threshold,
+            );
+            snowcfg.insert(
+                "contextKernelEnabled".to_string(),
+                json!(config.context_kernel_enabled),
             );
             set_input_optional(
                 &mut *snowcfg,
