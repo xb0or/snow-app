@@ -62,6 +62,24 @@ Time estimate: the native release build takes ~2-4 min; a full first-time packag
 (including electron-builder downloading electron / nsis dependencies) usually takes
 5-10 min. `.npmrc` is configured with the npmmirror registry to speed up downloads.
 
+### 3.2.1 Building installers with GitHub Actions (no local packaging needed)
+
+`.github/workflows/release.yml` produces installers for all three platforms on CI:
+
+- **Installers only (no publish)**: Actions → Release → _Run workflow_ with **`tag` left
+  empty**. Each platform builds and uploads its installers as workflow artifacts
+  (`release-win32-x64` / `release-darwin-arm64` / `release-linux-x64`); the `publish` job is
+  skipped and no Release is created. Equivalent CLI:
+  `gh workflow run release.yml --ref <branch>`.
+- **Build and publish**: push a tag (`git push origin v1.2.3`), or fill in `tag` in the
+  _Run workflow_ dialog. The `publish` job merges the platform artifacts, generates
+  `latest-mac.json`, verifies that the update manifests reference files that actually
+  exist, then creates the GitHub Release.
+- All three platforms build concurrently with `fail-fast: false`; Windows takes about 29
+  minutes and Linux about 14 minutes (including `npm ci` and the native release build).
+- Artifact names match the in-app updater (`latest.yml` / `latest-linux.yml` /
+  `latest-mac.yml`), so they can be used for auto-update directly.
+
 ### 3.3 Install / Update / Uninstall
 
 - **Install**: run `Snow App Setup <version>.exe`; the default install location is
