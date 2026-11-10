@@ -57,6 +57,7 @@ Snow CLI).
 | `enableAutoCompress`    | boolean |           | Auto-compress toggle                                                                                                                                                                                                                |
 | `autoCompressThreshold` | integer |           | Auto-compress threshold (percent)                                                                                                                                                                                                   |
 | `contextKernelEnabled`  | boolean |           | Context kernel (billion-context incremental folding) toggle; off by default. When on, normal conversations fold the outbound view on model-driven nudges and the legacy auto handoff is disabled                                    |
+| `contextKernel`         | object  |           | Fine-grained context kernel configuration (missing fields take defaults; out-of-range values only make the kernel more conservative). See "Context kernel configuration" below                                                      |
 | `toolResultTokenLimit`  | integer |           | Maximum percentage of the model context available to each tool result                                                                                                                                                               |
 | `anthropicBeta`         | boolean |           | Anthropic Beta header toggle                                                                                                                                                                                                        |
 | `streamingDisplay`      | boolean |           | Streaming display toggle                                                                                                                                                                                                            |
@@ -80,6 +81,48 @@ Snow CLI).
 > inactive draft may leave them empty, and API-key presence is not part of this
 > model-completeness check. Vision understanding, image generation, and embedding
 > use independent configuration and channels.
+
+### Context kernel configuration (`snowcfg.contextKernel`)
+
+An object; every field may be omitted and then takes its default. Parse failures,
+type mismatches and out-of-range values fall back to defaults — an out-of-range value
+can only make the kernel more conservative, never break a protection rule.
+
+| Field                    | Type     | Default                                                                                                    | Meaning                                                                               |
+| ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `tailProtectedMessages`  | integer  | 6                                                                                                          | Protected tail message count (1–64)                                                   |
+| `maxBlocks`              | integer  | 64                                                                                                         | Top-level block cap per session (1–512)                                               |
+| `ccrMinChars`            | integer  | 4000                                                                                                       | Tool results above this size become CCR placeholders (1000–200000)                    |
+| `ccrStoreMaxChars`       | integer  | 400000                                                                                                     | Content-store character cap                                                           |
+| `crushMinChars`          | integer  | 12000                                                                                                      | Results above this size get typed compression (crush) first                           |
+| `renderRefs`             | boolean  | true                                                                                                       | Render `[mNNNNN]` prefixes on user/assistant text in the outbound view                |
+| `snapToTurns`            | boolean  | true                                                                                                       | Snap folding ranges to turn boundaries                                                |
+| `viableRangeMinTokens`   | integer  | 800                                                                                                        | Minimum token size for a recommended range                                            |
+| `outputSteering`         | boolean  | false                                                                                                      | Append the verbosity directive to the nudge                                           |
+| `nudgeOverride`          | string   | empty                                                                                                      | Replace the nudge body (localization / team policy)                                   |
+| `protectedTools`         | string[] | `[]`                                                                                                       | Extra protected tool names (trailing `*` glob, case-insensitive)                      |
+| `protectedLatestTools`   | string[] | `[]`                                                                                                       | Protect only the newest call of a tool (cumulative snapshots, e.g. `todo_list`)       |
+| `preserveRecentTools`    | string[] | `[]`                                                                                                       | Subtract these patterns from the built-in never-preserve-recent list (e.g. `read`)    |
+| `preserveRecentMessages` | integer  | 5                                                                                                          | Soft-protected recent message count                                                   |
+| `preserveRecentTokens`   | integer  | 5000                                                                                                       | Soft-protected recent token budget (expands backward)                                 |
+| `modelContextLimit`      | integer  | 200000                                                                                                     | Model context limit (used for the emergency verdict)                                  |
+| `compress`               | object   | `{minCompressRange:5000, maxSummaryLength:20000, minSummaryLength:50}`                                     | Compression gate; `minCompressRange` counts **real characters** (validated per batch) |
+| `tiers`                  | object   | `{enabled:true, tier2Trigger:1000, tier3Trigger:2000}`                                                     | Tiered distillation triggers                                                          |
+| `nudge`                  | object   | upstream defaults                                                                                          | Nudge cadence and growth gates (`maxContextLimitPct`, `emergencyThresholdPct`, …)     |
+| `truncate`               | object   | `{threshold:0.95, terminalEscapeAfter:3}`                                                                  | Emergency truncation                                                                  |
+| `absorb`                 | object   | `{enabled:false, toolName:"absorb", minToolTokens:4000, ...}`                                              | Instant tool-result absorption                                                        |
+| `crush`                  | object   | `{enabled:false, minReduction:0.1}`                                                                        | Typed deterministic compression                                                       |
+| `imageCompression`       | object   | `{enabled:false, minTokens:512, maxDimension:1280, quality:80, format:"webp"}`                             | Screenshot downscaling                                                                |
+| `ccr`                    | object   | `{enabled:false, toolName:"acp_retrieve", minToolTokens:4000, maxHeadChars:96, retrieveInlineTokens:4000}` | Content-cached retrieval                                                              |
+| `outputSteeringSettings` | object   | `{enabled:false, verbosityLevel:2, effortRouting:true}`                                                    | Output steering (verbosity L0–L4 plus clamp-only effort routing)                      |
+| `rules`                  | object   | `{maxRules:50, maxRuleChars:300}`                                                                          | Persistent rule limits                                                                |
+
+The kernel follows the upstream `acp-kernel` 0.0.101 module semantics (`refs` /
+`segment` / `viable` / `boundaries` / `block-map` / `tool-pairs` / `turn-integrity` /
+`protected` / `recommend` / `nudge-text` / `output-steering` / `report` / `handoff` /
+`rules`). The byte-stable texts (verbosity directives, placeholders, absorb /
+image_full notices, compression rules, tool schemas) are exported straight from the
+upstream dist by `gen-kernel-texts.mjs` and must not be hand-edited.
 
 ## 3. proxy-config.json (scope: `proxy`)
 

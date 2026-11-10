@@ -238,6 +238,38 @@ impl McpService for ContextKernelService {
             },
             McpTool {
                 server_id: SERVER_ID.to_string(),
+                name: "recap".to_string(),
+                description: "Compression recap: every active block with its span (`mNNNNN–mNNNNN`), tier, tokens saved and the head of its summary. Pass `blockId` to recap a single block. Read-only; use it in handoffs and long-running goals to restate what has already been folded without decompressing anything.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "blockId": {
+                            "type": "string",
+                            "description": "Optional: recap only this block, e.g. \"b3\"."
+                        }
+                    }
+                }),
+            },
+            McpTool {
+                server_id: SERVER_ID.to_string(),
+                name: "handoff".to_string(),
+                description: "Render a readable session handoff document (title, session id, context tokens, block counts, the conversation as the model sees it). `full: true` (default) re-attaches the original messages of every folded range. Intended for Goal / WorkTree mode handoffs and for auditing what the outbound view contains. Read-only.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Optional handoff title."
+                        },
+                        "full": {
+                            "type": "boolean",
+                            "description": "Include the original messages of folded ranges (default true)."
+                        }
+                    }
+                }),
+            },
+            McpTool {
+                server_id: SERVER_ID.to_string(),
                 name: "acp_status".to_string(),
                 description: "Report the context kernel state: estimated outbound tokens (real tokenizer), latest observed upstream usage, threshold, whether compression is needed, active blocks with their tier/children, `highestTier`/`maxTier`, the protected rules in force, and the stable message refs (newest `refLimit` entries) with role, token estimate, preview, pinned/tailProtected/compressed flags. Call it before compress to choose a range.".to_string(),
                 input_schema: json!({
@@ -258,7 +290,7 @@ impl McpService for ContextKernelService {
         Err(Error::new(
             Status::GenericFailure,
             format!(
-                "Tool \"{tool_name}\" of server \"{SERVER_ID}\" requires the async call_mcp_tool path (conversation context). Available tools: [context-kernel-compress, context-kernel-absorb, context-kernel-decompress, context-kernel-retrieve, context-kernel-search_context, context-kernel-acp_status, context-kernel-acp_cache, context-kernel-acp_rule]"
+                "Tool \"{tool_name}\" of server \"{SERVER_ID}\" requires the async call_mcp_tool path (conversation context). Available tools: [context-kernel-compress, context-kernel-absorb, context-kernel-decompress, context-kernel-retrieve, context-kernel-search_context, context-kernel-acp_status, context-kernel-acp_cache, context-kernel-acp_rule, context-kernel-recap, context-kernel-handoff]"
             ),
         ))
     }

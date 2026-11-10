@@ -828,6 +828,27 @@ flowchart TD
 > 来源：[ranxianglei/billion-context](https://github.com/ranxianglei/billion-context)
 > 的 `acp-kernel`（MIT）。此处是其内核语义在 Snow 原生层的适配实现。
 
+#### 10.1.1 上游模块对应表
+
+内核按上游 `acp-kernel` 0.0.101 的模块逐个移植；`native/src/api/conversation/context_kernel/`
+下的子模块与上游文件名一一对应。
+
+| 上游模块                                                                                           | Snow 位置          | 语义                                                                               |
+| -------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| `refs`                                                                                             | `refs.rs`          | `mNNNNN` 引用分配 / 解析、`baseIdOf`、摘要消息 id                                  |
+| `segment` / `viable` / `message-kind` / `transform-channel` / `truncate`                           | `segments.rs`      | 数组相邻性分段、可行区间（≥200 token）、工具消息判定、变换通道选择、代理项安全裁剪 |
+| `boundaries` / `block-map` / `tool-pairs` / `reasoning-pairs` / `turn-integrity` / `instance-reid` | `segments.rs`      | 边界解析、块跨度、工具对/思考对扩展、轮内原子性（#684）、重复实例改号              |
+| `protected` / `recommend` / `nudge-text`                                                           | `protection.rs`    | 永久保护工具、最近窗口排除、可压缩/受保护区间、nudge 渲染（字节对齐）              |
+| `output-steering`                                                                                  | `steering.rs`      | 轮结构分类、简洁度 L0–L4、只降不升的 effort 路由、系统提示词尾部幂等落地           |
+| `report` / `handoff` / `rules`                                                                     | `rendering.rs`     | 状态报告、压缩回放、会话交接文档、持久规则渲染                                     |
+| 全部常量                                                                                           | `texts.rs`（生成） | 简洁度指令、占位符、absorb / image_full 提示、压缩规则文本、工具 schema            |
+
+`texts.rs` 由 `scripts/gen-kernel-texts.mjs` 从上游 dist 直接导出，可用
+`scripts/verify-kernel-texts.mjs` 逐条比对（53 个常量 / 数组必须字节一致）。两个脚本
+读 `ACP_KERNEL_DIST` 环境变量（默认指向本机解包的 `acp-kernel/dist/index.js`）。
+这些文本进入前缀缓存敏感位置（系统提示词尾部、工具结果、占位符），改一个字符就会
+击穿所有会话的缓存，因此禁止手改；上游升级后重新生成并重跑校验即可。
+
 ## 11. 回滚
 
 `useRollback.ts` 先 abort 当前流并取消 summary generation，计算 checkpoint diff 和将删除的 TODO，展示预览。确认后等待流与 summary Promise 完全结束，避免和 SQLite 写事务竞态。用户可选择只截断对话，或同时调用 `restoreCheckpoint` 恢复文件。

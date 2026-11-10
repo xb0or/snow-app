@@ -129,6 +129,8 @@ pub const READONLY_TOOL_NAMES: &[&str] = &[
     "context-kernel-acp_status",
     "context-kernel-acp_cache",
     "context-kernel-acp_rule",
+    "context-kernel-recap",
+    "context-kernel-handoff",
 ];
 
 /// 返回仍注册在案的只读工具全名（过滤掉已删除/改名工具的过期条目）。
