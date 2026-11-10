@@ -857,6 +857,59 @@ image-compress / surface-config / parse-compress-input / cache-report 的实测�
 这些文本进入前缀缓存敏感位置（系统提示词尾部、工具结果、占位符），改一个字符就会
 击穿所有会话的缓存，因此禁止手改；上游升级后重新生成并重跑校验即可。
 
+#### 10.1.2 上游模块覆盖表
+
+上游 `acp-kernel` 0.0.101 的全部模块（46 个 `.ts` + 5 个子目录入口）与本移植的对应关系：
+
+| 上游                            | 状态   | 位置 / 说明                                                                                                       |
+| ------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
+| `refs`                          | 完整   | `refs.rs`：ref 算术、`baseIdOf`、`MessageRefMap`、`assignRefs`                                                    |
+| `segment` / `viable`            | 完整   | `segments.rs`                                                                                                     |
+| `message-kind`                  | 完整   | `segments.rs`                                                                                                     |
+| `transform-channel`             | 完整   | `segments.rs`                                                                                                     |
+| `truncate`                      | 完整   | `segments.rs`（代理项安全裁剪）                                                                                   |
+| `boundaries`                    | 完整   | `segments.rs`：`parseBoundary`、可见锚点、块区间相交                                                              |
+| `block-map`                     | 完整   | `segments.rs`：跨度解析、`formatCreatedBlocks`                                                                    |
+| `tool-pairs`                    | 完整   | `segments.rs`（不动点扩边）                                                                                       |
+| `reasoning-pairs`               | 完整   | `segments.rs`                                                                                                     |
+| `turn-integrity`                | 完整   | `segments.rs`：轮组 + 折叠完整性闸门（INV1/INV2）                                                                 |
+| `instance-reid`                 | 部分   | `segments.rs`：判定与改号语义在位；Snow 的 id 由内容哈希派生，`_k` 派生位仅在载荷带 id 时生效                     |
+| `protected`                     | 完整   | `protection.rs`：永久保护工具、`NEVER_PRESERVE_RECENT`、latest-only、`toolCallId` 配对保护                        |
+| `recommend`                     | 完整   | `protection.rs`：软保护 refs、可压缩/受保护区间、按真实字符数的阈值合并                                           |
+| `nudge-text`                    | 完整   | `protection.rs`：`formatRanges` / `formatBlockMap` / `formatTierTargetBlocks` / `renderNudgeText`                 |
+| `output-steering`               | 完整   | `steering.rs`：轮分类、L0–L4、只降不升 effort、尾部幂等落地                                                       |
+| `report`                        | 完整   | `rendering.rs`：`buildStatusReport` / `buildRecap`                                                                |
+| `handoff`                       | 完整   | `rendering.rs`：`renderMessage` / `renderHandoff` / `matchSession`                                                |
+| `rules`                         | 完整   | `rendering.rs` + `execute_rule`（Snow 侧沿用既有 `acp_rule` 工具）                                                |
+| `prompts` / `compression-rules` | 完整   | `texts.rs`（冻结文本）+ `porting.rs::resolve_prompts`                                                             |
+| `packs`                         | 完整   | `porting.rs`：清洗、默认 / lean 包、按名解析                                                                      |
+| `surface-config`                | 完整   | `porting.rs`：三态段覆盖、深度 description 覆盖                                                                   |
+| `parse-compress-input`          | 完整   | `porting.rs`：对象 / 行形式 / 宽松 JSON / 截断救援 + 诊断                                                         |
+| `compress-tools`                | 完整   | `texts.rs` 的上游 schema + `porting.rs::tool_schema`                                                              |
+| `content-store`                 | 完整   | `content.rs`：sha256 内容寻址、先写者胜                                                                           |
+| `ccr`                           | 完整   | `content.rs`：占位符、整段解析、框定、导出指针、`applyRetrieve`                                                   |
+| `absorb`                        | 完整   | `absorb.rs`：提示、候选、宽松解析、追加提示（块状态机沿用 Snow 的 absorbed 块）                                   |
+| `crush`                         | 完整   | `absorb.rs`：JSON 方差折叠 / 代码裁剪 / 日志筛选 + 两段式闸门                                                     |
+| `image-compress`                | 完整   | `image.rs`：头部维数、瓦片计费、路由决策、`image_full` 状态机                                                     |
+| `truncate-tools`                | 完整   | `content.rs`：工具输出预算裁剪                                                                                    |
+| `cache-report`                  | 完整   | `analytics.rs`：三桶拆分、折叠经济学、渲染                                                                        |
+| `search`                        | 完整   | `porting.rs`：角色权重 + substring / bm25 / fuzzy / hybrid                                                        |
+| `pipeline`                      | 部分   | `porting.rs` 暴露节点序与效果结构；Snow 侧由 `apply_outgoing_view` 内联执行同一顺序                               |
+| `filter`                        | 部分   | `porting.rs` 提供部件过滤器与执行语义；运行时注册表按宿主需要再挂                                                 |
+| `sync` / `state`                | 部分   | Snow 用 `prune_stale_blocks` / `KernelState` 对应；`advanceSurvival`、`allocateRunId` 等为预留                    |
+| `prune` / `render-refs`         | 部分   | Snow 的 `fold` / `hide_consumed` / `decorate_refs` 覆盖主路径；`tokenSnapshot`、`isRenderedSummaryMessage` 未移植 |
+| `decompress`                    | 部分   | `execute_decompress` 覆盖还原主路径；`collectBlockContent` / `activeAncestorIds` / refold-in-place 未移植         |
+| `rebuild`                       | 完整   | `rebuild_state_from_journal`（重放 fold journal，与上游「重放 compress 调用」同目标不同源）                       |
+| `tokenize`                      | 完整   | 复用 `api::token_counter`（真实 o200k_base 分词器，比上游估算更准）                                               |
+| `types` / `index`               | 不适用 | Rust 侧以结构体与模块导出替代 barrel 与类型声明                                                                   |
+| `persist`                       | 完整   | Snow 侧落在 `context_kernel_state` / `context_kernel_folds` 两张表                                                |
+| `panel` / `wire`                | 不适用 | 内核在 Rust 内、UI 走既有状态栏、wire 由五条 provider 线各自组装；上游这两个入口是宿主层职责                      |
+
+**剩余差异**（不影响默认关闭时的行为，属后续增量）：`decompress` 的三个辅助原语、
+`render-refs` 的 token 快照、`prune` 的渲染摘要识别、`state` 的存活晋升 / run id、
+`instance-reid` 的 `_k` 改号、`pipeline` 的节点对象注册表、`filter` 的运行时注册、
+`sync` 的 `deactivated` 列表。
+
 ## 11. 回滚
 
 `useRollback.ts` 先 abort 当前流并取消 summary generation，计算 checkpoint diff 和将删除的 TODO，展示预览。确认后等待流与 summary Promise 完全结束，避免和 SQLite 写事务竞态。用户可选择只截断对话，或同时调用 `restoreCheckpoint` 恢复文件。
