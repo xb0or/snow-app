@@ -771,11 +771,19 @@ The full transcript still goes to `chat_messages`, the UI is unchanged, and only
 store_json, updated_at)`, scoped by conversation + sub-agent and cascade-deleted with the
   conversation.
 - Threshold: reuses `autoCompressThreshold` (falling back to 60% of `maxContextTokens`).
-  When the estimated outbound tokens reach it, a nudge is appended to the outbound tail; the
-  nudge is never persisted.
-- Tools: `context-kernel-acp_status` / `compress` / `decompress` / `search_context`, all
-  read-only (no approval). `call_mcp_tool` injects the current conversation, so the model
-  cannot operate on another one.
+  When the estimated tokens or the latest real usage reach it, a nudge is appended to the
+  outbound tail; the nudge is never persisted.
+- Tools: `context-kernel-acp_status` / `compress` / `decompress` / `retrieve` /
+  `search_context`, all read-only (no approval). `call_mcp_tool` injects the current
+  conversation, so the model cannot operate on another one. `compress` additionally runs the
+  renderer-side `beforeCompress` hook (warn / decision / abort).
+- CCR: a single tool result longer than 4000 chars is replaced in the outbound view by a
+  content-hash-derived `[context-kernel:stored ref=cr…]` placeholder; the original goes into
+  a bounded content store (400k chars). Placeholders are frozen once created, so later turns
+  produce identical bytes and prefix caching keeps working.
+- UI: a status bar above the composer shows block count, outbound/threshold tokens and stored
+  placeholders; expanding it lists each block's title and covered-message count. It reads the
+  read-only `context-kernel:get-status` IPC and never writes.
 - Off (default): the tools are filtered out of the payload and folding never runs, so the
   request is identical to the pre-feature behaviour.
 

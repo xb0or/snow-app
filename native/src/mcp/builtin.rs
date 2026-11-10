@@ -123,6 +123,7 @@ pub const READONLY_TOOL_NAMES: &[&str] = &[
     // 上下文内核：只改出站视图状态（压缩块），不写工作区，全部免审批。
     "context-kernel-compress",
     "context-kernel-decompress",
+    "context-kernel-retrieve",
     "context-kernel-search_context",
     "context-kernel-acp_status",
 ];

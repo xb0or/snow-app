@@ -3119,6 +3119,8 @@ export type NativeBridge = ImageGenerationNativeApi & {
   getChatConversation: (
     conversationId: string,
   ) => Promise<ChatConversationRecord | null>;
+  /** 上下文内核状态 JSON（只读；空会话返回空串）。 */
+  getContextKernelStatus: (conversationId: string) => Promise<string>;
   /** 预览历史会话引用 chip 发送时实际注入的上下文内容（与请求组装共用渲染与预算）。 */
   previewConversationAttachment: (conversationId: string) => Promise<string>;
   listSubAgentConversations: (

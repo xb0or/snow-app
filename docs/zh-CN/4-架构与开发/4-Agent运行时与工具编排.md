@@ -780,10 +780,17 @@ API 档案开启 `contextKernelEnabled` 后，常规对话不再依赖一次性 
 - 状态：`context_kernel_state(conversation_id, sub_agent_id, kernel_version,
 state_json, store_json, updated_at)`，按会话 + 子代理隔离，随会话级联删除。
 - 阈值：复用 `autoCompressThreshold`（未配置时取 `maxContextTokens` 的 60%）。
-  估算 token 达到阈值时在出站尾部追加 nudge，提示模型先查 ref 再压缩；nudge
-  只存在于出站视图，不落库。
-- 工具：`context-kernel-acp_status` / `compress` / `decompress` / `search_context`，
-  全部只读免审批；工具执行前后经 `call_mcp_tool` 注入当前会话，模型无法跨会话操作。
+  估算 token 或最近一次真实用量达到阈值时在出站尾部追加 nudge，提示模型先查 ref
+  再压缩；nudge 只存在于出站视图，不落库。
+- 工具：`context-kernel-acp_status` / `compress` / `decompress` / `retrieve` /
+  `search_context`，全部只读免审批；工具执行前后经 `call_mcp_tool` 注入当前会话，
+  模型无法跨会话操作。`compress` 在渲染层还会额外执行 `beforeCompress` hook，
+  支持 warn / decision / abort。
+- CCR（可选能力强项）：单条工具结果超过 4000 字符时，出站视图用由内容哈希生成的
+  `[context-kernel:stored ref=cr…]` 占位符替换；原文写入有界 content store
+  （400k 字符上限），占位符生成即冻结，后续轮次字节一致，前缀缓存不受影响。
+- UI：输入区上沿状态条展示块数量、出站/阈值 token 与占位条目数，展开可看每个块的
+  标题与被覆盖消息数；数据来自只读 IPC `context-kernel:get-status`，不触发任何写入。
 - 关闭时（默认）：工具从载荷中过滤、折叠逻辑完全不执行，请求与本特性引入前一致。
 
 ```mermaid

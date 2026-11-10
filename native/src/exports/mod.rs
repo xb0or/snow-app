@@ -1,6 +1,7 @@
 mod api;
 pub(crate) mod checkpoint;
 pub(crate) mod codebase;
+mod context_kernel;
 mod detached_tasks;
 mod engine;
 mod explorer_menu;

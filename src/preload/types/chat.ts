@@ -179,3 +179,33 @@ export type ReplyPredictionRequest = {
 export type ReplyPredictionResult = {
   content: string;
 };
+
+/** 上下文内核压缩块（UI 只读展示）。 */
+export type ContextKernelBlockStatus = {
+  blockId: string;
+  title: string;
+  coveredMessages: number;
+  summaryTokens: number;
+  createdAt: string;
+};
+
+/**
+ * 上下文内核状态快照（`getContextKernelStatus`）。`estimatedTokens` 是本地
+ * 估算，`observedTokens` 是最近一次 assistant 响应记录的上游真实用量。
+ */
+export type ContextKernelStatus = {
+  kernelVersion: string;
+  conversationId: string;
+  totalMessages: number;
+  outboundMessages: number;
+  estimatedTokens: number;
+  observedTokens: number | null;
+  rawTokens: number;
+  thresholdTokens: number | null;
+  compressNeeded: boolean;
+  compressedMessages: number;
+  activeBlocks: number;
+  storedEntries: number;
+  storedChars: number;
+  blocks: ContextKernelBlockStatus[];
+};

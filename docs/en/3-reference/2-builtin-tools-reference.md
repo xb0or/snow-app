@@ -551,6 +551,7 @@ These tools change only the outbound message view — stored history, the UI and
 | `context-kernel-acp_status`     | Report outbound token estimate, threshold, whether compression is needed, active blocks, and stable refs for recent messages | `refLimit` (4-200, default 40)                                       |
 | `context-kernel-compress`       | Cover a contiguous run of older messages with a self-contained model-written summary, creating a block                       | `from`, `to` (message refs, required), `summary` (required), `title` |
 | `context-kernel-decompress`     | Drop a block so its original messages become visible to the model again                                                      | `blockId` (e.g. `b1`)                                                |
+| `context-kernel-retrieve`       | Read the original tool output behind a `[context-kernel:stored ...]` placeholder                                             | `ref` (e.g. `cr1a2b3c4d5e6f7890`)                                    |
 | `context-kernel-search_context` | Keyword search across the full transcript (including messages hidden behind blocks) and block summaries                      | `query` (required), `limit` (1-30, default 8)                        |
 
 Rules:
@@ -563,12 +564,17 @@ Rules:
   protected tail are rejected with the currently valid refs in the error.
 - A block's summary message is byte-stable in later turns, so the prefix before the block
   keeps hitting the prompt cache.
+- CCR: a single tool result longer than 4000 chars is replaced in the outbound view by a
+  `[context-kernel:stored ref=cr… chars=…]` placeholder (the original goes into a bounded
+  400k-char content store). The placeholder is derived from the content hash and frozen once
+  created; `context-kernel-retrieve` returns the full text by ref. Stored tool results are
+  untouched.
 - State is scoped by `conversation_id + sub-agent marker` and is cascade-deleted with the
   conversation.
 - The threshold reuses the profile's `autoCompressThreshold` (falling back to 60% of the
   context window); once reached, one nudge is appended to the outbound tail so the model
   lists refs and compresses.
-- All four are read-only (no approval): they never touch the workspace or call external
+- All five are read-only (no approval): they never touch the workspace or call external
   services, only the kernel state.
 
 > Source: `acp-kernel` from

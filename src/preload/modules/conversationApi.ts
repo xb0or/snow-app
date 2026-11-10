@@ -4,6 +4,7 @@ import type {
   ChatConversationRecord,
   ChatMessagePage,
   ChatMessageRecord,
+  ContextKernelStatus,
   ConversationImportProgress,
   ConversationImportSummary,
   ConversationSearchResult,
@@ -155,6 +156,11 @@ export const conversationApi = {
     ipcRenderer.invoke("chat-conversations:get", conversationId),
   previewConversationAttachment: (conversationId: string): Promise<string> =>
     ipcRenderer.invoke("chat-conversations:preview-attachment", conversationId),
+  /** 上下文内核状态（只读，供输入区状态条展示）。 */
+  getContextKernelStatus: (
+    conversationId: string,
+  ): Promise<ContextKernelStatus | null> =>
+    ipcRenderer.invoke("context-kernel:get-status", conversationId),
   updateConversationStatus: (
     conversationId: string,
     status: string,

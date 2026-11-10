@@ -14,7 +14,7 @@
 //!
 //! 上游来源：https://github.com/ranxianglei/billion-context（`kernel/`，MIT）。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use napi::bindgen_prelude::*;
@@ -50,6 +50,13 @@ const DEFAULT_SEARCH_LIMIT: usize = 8;
 /// 预览长度（状态 / 检索结果里的单行摘要）。
 const PREVIEW_CHARS: usize = 160;
 
+/// CCR（context compression retrieval）：超过该字符数的工具结果在出站视图里
+/// 替换为占位符，原文进入 content store，由 `context-kernel-retrieve` 取回。
+const CCR_MIN_CHARS: usize = 4000;
+const CCR_PREVIEW_CHARS: usize = 240;
+const CCR_STORE_MAX_CHARS: usize = 400_000;
+const CCR_MARKER: &str = "[context-kernel:stored";
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KernelBlock {
@@ -70,6 +77,18 @@ pub struct KernelState {
     pub blocks: Vec<KernelBlock>,
     pub next_block_id: u64,
     pub updated_at: String,
+    /// CCR content store：`cr<hash>` → 原始工具结果。占位符一旦生成即冻结，
+    /// 后续轮次重新计算出同样的占位字节，前缀缓存不受影响。
+    pub store: BTreeMap<String, StoredEntry>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StoredEntry {
+    pub kind: String,
+    pub chars: usize,
+    pub text: String,
+    pub created_at: String,
 }
 
 impl KernelState {
@@ -79,7 +98,12 @@ impl KernelState {
             blocks: Vec::new(),
             next_block_id: 1,
             updated_at: String::new(),
+            store: BTreeMap::new(),
         }
+    }
+
+    fn stored_chars(&self) -> usize {
+        self.store.values().map(|entry| entry.chars).sum()
     }
 }
 
@@ -306,6 +330,146 @@ fn nudge_message(estimate: i64, threshold: i64) -> ChatContextMessage {
 }
 
 // ---------------------------------------------------------------------------
+// CCR: large tool-result placeholders + retrieval
+// ---------------------------------------------------------------------------
+
+fn ccr_ref(text: &str) -> String {
+    let digest = blake3::hash(text.as_bytes()).to_hex().to_string();
+    format!("cr{}", &digest[..16])
+}
+
+/// 冻结占位符：同一原文永远生成同一段字节，不需要每轮重写前缀。
+fn ccr_placeholder(ref_id: &str, kind: &str, text: &str) -> String {
+    let chars = text.chars().count();
+    let preview: String = text.chars().take(CCR_PREVIEW_CHARS).collect();
+    let ellipsis = if chars > CCR_PREVIEW_CHARS { "…" } else { "" };
+    format!(
+        "{CCR_MARKER} ref={ref_id} kind={kind} chars={chars}]\n{preview}{ellipsis}\n\n> Original tool output is stored out of band. Call `context-kernel-retrieve` with ref \"{ref_id}\" to read it in full."
+    )
+}
+
+fn store_original(state: &mut KernelState, kind: &str, text: &str) -> String {
+    let ref_id = ccr_ref(text);
+    if state.store.contains_key(&ref_id) {
+        return ref_id;
+    }
+    state.store.insert(
+        ref_id.clone(),
+        StoredEntry {
+            kind: kind.to_string(),
+            chars: text.chars().count(),
+            text: text.to_string(),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        },
+    );
+    // 有界存储：超出上限时按 ref 顺序淘汰最早插入的一批（ref 由内容决定，
+    // 淘汰只影响 retrieve 可用性，不影响出站字节的稳定性）。
+    while state.stored_chars() > CCR_STORE_MAX_CHARS {
+        let Some(oldest) = state.store.keys().next().cloned() else {
+            break;
+        };
+        state.store.remove(&oldest);
+    }
+    ref_id
+}
+
+/// 把超长工具结果替换为占位符。只改出站副本，落库内容不动。
+fn apply_ccr(messages: &mut [ChatContextMessage], state: &mut KernelState) -> usize {
+    let mut replaced = 0usize;
+    for message in messages.iter_mut() {
+        if message.role.trim() != "tool" {
+            continue;
+        }
+        if !message.content.trim().is_empty()
+            && !message.content.starts_with(CCR_MARKER)
+            && message.content.chars().count() >= CCR_MIN_CHARS
+        {
+            let ref_id = store_original(state, "tool_text", &message.content);
+            message.content = ccr_placeholder(&ref_id, "tool_text", &message.content);
+            replaced += 1;
+        }
+        let Some(raw) = message.tool_results_json.clone() else {
+            continue;
+        };
+        let Ok(mut value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let Some(entries) = value.as_array_mut() else {
+            continue;
+        };
+        let mut changed = false;
+        for entry in entries.iter_mut() {
+            let Some(result) = entry
+                .get("result")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+            else {
+                continue;
+            };
+            if result.starts_with(CCR_MARKER) || result.chars().count() < CCR_MIN_CHARS {
+                continue;
+            }
+            let ref_id = store_original(state, "tool_result", &result);
+            entry["result"] = Value::String(ccr_placeholder(&ref_id, "tool_result", &result));
+            changed = true;
+            replaced += 1;
+        }
+        if changed {
+            message.tool_results_json = Some(value.to_string());
+        }
+    }
+    replaced
+}
+
+/// `context-kernel-retrieve`: 按 ref 取回被占位符替换的原始工具结果。
+fn execute_retrieve(
+    database_path: &Path,
+    conversation_id: &str,
+    sub_agent_id: &str,
+    args: &Value,
+) -> Result<Value> {
+    let ref_id = identifier_arg(args, "ref")?;
+    let state = load_state(database_path, conversation_id, sub_agent_id)?;
+    let Some(entry) = state.store.get(&ref_id) else {
+        return Err(Error::new(
+            Status::InvalidArg,
+            format!(
+                "Unknown or evicted ref: {ref_id}. Placeholders always carry their ref; call context-kernel-acp_status for the current stored-entry count."
+            ),
+        ));
+    };
+    Ok(json!({
+        "success": true,
+        "ref": ref_id,
+        "kind": entry.kind,
+        "chars": entry.chars,
+        "text": entry.text,
+    }))
+}
+
+/// 最近一次 assistant 响应记录的真实用量（input + output + cache）。
+/// nudge 优先使用上游真实 usage，估算器只作补充。
+pub fn latest_usage_tokens(database_path: &Path, conversation_id: &str) -> Option<i64> {
+    if conversation_id.trim().is_empty() {
+        return None;
+    }
+    let connection = database::open_connection(database_path).ok()?;
+    let total: i64 = connection
+        .query_row(
+            "SELECT COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
+                    + COALESCE(cache_creation_input_tokens, 0) + COALESCE(cache_read_input_tokens, 0)
+               FROM chat_messages
+              WHERE conversation_id = ?1 AND role = 'assistant'
+              ORDER BY rowid DESC
+              LIMIT 1",
+            rusqlite::params![conversation_id],
+            |row| row.get(0),
+        )
+        .ok()?;
+    (total > 0).then_some(total)
+}
+
+// ---------------------------------------------------------------------------
 // State persistence
 // ---------------------------------------------------------------------------
 
@@ -478,6 +642,7 @@ pub fn apply_outgoing_view(
     conversation_id: &str,
     sub_agent_id: &str,
     threshold_tokens: Option<i64>,
+    observed_tokens: Option<i64>,
     messages: &mut Vec<ChatContextMessage>,
 ) -> Result<i64> {
     if conversation_id.trim().is_empty() {
@@ -485,14 +650,22 @@ pub fn apply_outgoing_view(
     }
     let mut state = load_state(database_path, conversation_id, sub_agent_id)?;
     let positions = HistoryView::build(messages.clone()).positions;
-    let changed = prune_stale_blocks(&mut state, &positions);
+    let mut changed = prune_stale_blocks(&mut state, &positions);
 
-    let (mut folded, tokens) = fold(messages, &state);
+    let (mut folded, mut tokens) = fold(messages, &state);
+    // CCR：超长工具结果在出站视图里换成冻结占位符，原文进入 content store。
+    if apply_ccr(&mut folded, &mut state) > 0 {
+        changed = true;
+        // 占位符会显著缩小出站体积，nudge 判断必须用压缩后的估算。
+        tokens = folded.iter().map(estimate_message_tokens).sum();
+    }
     let threshold = threshold_tokens.filter(|value| *value > 0);
     // 子代理没有内核工具（不在其工具白名单内），nudge 只会变成噪声；只折叠可用块。
     if let Some(threshold) = threshold {
-        if tokens >= threshold && sub_agent_id.is_empty() {
-            folded.push(nudge_message(tokens, threshold));
+        // 真实 usage 优先：估算器只补足上游没给 usage 的情况。
+        let effective = tokens.max(observed_tokens.unwrap_or(0));
+        if effective >= threshold && sub_agent_id.is_empty() {
+            folded.push(nudge_message(effective, threshold));
         }
     }
     *messages = folded;
@@ -827,6 +1000,14 @@ fn execute_status(
     let view = HistoryView::build(messages);
     prune_stale_blocks(&mut state, &view.positions);
     let (folded, folded_tokens) = fold(&view.messages, &state);
+    // 状态里的 token 估算同样要反映 CCR 占位符（但不写回 store）。
+    let mut folded_preview = folded.clone();
+    let mut state_preview = state.clone();
+    let folded_tokens = if apply_ccr(&mut folded_preview, &mut state_preview) > 0 {
+        folded_preview.iter().map(estimate_message_tokens).sum()
+    } else {
+        folded_tokens
+    };
     let covered = covered_lookup(&state);
     let tail_from = view.tail_protected_from();
     let pinned = view.pinned_index();
@@ -870,6 +1051,7 @@ fn execute_status(
         .collect();
 
     let threshold = threshold_tokens.filter(|value| *value > 0);
+    let observed = latest_usage_tokens(database_path, conversation_id);
     Ok(json!({
         "success": true,
         "kernelVersion": KERNEL_VERSION,
@@ -878,11 +1060,14 @@ fn execute_status(
         "totalMessages": view.messages.len(),
         "outboundMessages": folded.len(),
         "estimatedTokens": folded_tokens,
+        "observedTokens": observed,
         "rawTokens": view.total_tokens(),
         "thresholdTokens": threshold,
-        "compressNeeded": threshold.map(|value| folded_tokens >= value).unwrap_or(false),
+        "compressNeeded": threshold.map(|value| folded_tokens.max(observed.unwrap_or(0)) >= value).unwrap_or(false),
         "compressedMessages": covered.len(),
         "activeBlocks": blocks_json.len(),
+        "storedEntries": state.store.len(),
+        "storedChars": state.stored_chars(),
         "blocks": blocks_json,
         "refs": refs_json,
         "protected": {
@@ -904,6 +1089,7 @@ pub fn execute_tool(
     match tool_name {
         "compress" => execute_compress(database_path, conversation_id, sub_agent_id, args),
         "decompress" => execute_decompress(database_path, conversation_id, sub_agent_id, args),
+        "retrieve" => execute_retrieve(database_path, conversation_id, sub_agent_id, args),
         "search_context" => execute_search(database_path, conversation_id, sub_agent_id, args),
         "acp_status" => execute_status(
             database_path,
@@ -917,6 +1103,25 @@ pub fn execute_tool(
             format!("Unknown context-kernel tool: {other}"),
         )),
     }
+}
+
+/// 供 UI / 只读 IPC 使用的状态快照（阈值取当前生效 API 档案）。
+pub fn status_snapshot(database_path: &Path, conversation_id: &str) -> Result<Value> {
+    let threshold = crate::api::config::get_active_api_request_context()
+        .ok()
+        .and_then(|context| {
+            resolve_threshold(
+                context.api_config.auto_compress_threshold,
+                context.api_config.max_context_tokens,
+            )
+        });
+    execute_status(
+        database_path,
+        conversation_id,
+        "",
+        threshold,
+        &json!({ "refLimit": 12 }),
+    )
 }
 
 /// 子代理会话键：子代理请求使用自己的 conversation id，这里额外带上前缀，
