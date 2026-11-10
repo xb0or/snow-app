@@ -743,11 +743,16 @@ pub async fn prepare_context_request(
             request.auto_compress_threshold,
             request.max_context_tokens,
         );
+        // nudge 优先使用上游真实 usage（最近一次 assistant 响应快照），
+        // 估算器只在上游没给用量时补足。
+        let observed_tokens =
+            super::context_kernel::latest_usage_tokens(request.database_path, &conversation_id);
         if let Err(error) = super::context_kernel::apply_outgoing_view(
             request.database_path,
             &conversation_id,
             &sub_agent_id,
             threshold,
+            observed_tokens,
             &mut messages,
         ) {
             // 上下文管理失败绝不能阻断请求：退回未折叠视图。

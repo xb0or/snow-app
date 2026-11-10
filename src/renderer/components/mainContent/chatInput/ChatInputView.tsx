@@ -13,6 +13,7 @@ import type {
   RollbackWorkflowComposerState,
 } from "./types";
 import { InputOverlayLayer } from "./InputOverlayLayer";
+import { ContextKernelStatusBar } from "./ContextKernelStatusBar";
 import { TerminalMonitorBar } from "./TerminalMonitorBar";
 import { ChatInputPanels } from "./ChatInputPanels";
 import { OPEN_PROJECT_CODEBASE_PANEL_EVENT } from "./ProjectCodebasePanel";
@@ -957,6 +958,11 @@ export const ChatInputView = ({
           loadError={rollbackPicker.loadError}
           containerRef={rollbackPicker.containerRef}
           onSelect={rollbackPicker.select}
+        />
+        <ContextKernelStatusBar
+          conversationId={activeConversationId ?? null}
+          enabled={runtimeApiConfig?.contextKernelEnabled ?? false}
+          refreshKey={`${activeConversationId ?? ""}:${tokenUsage?.inputTokens ?? 0}:${tokenUsage?.outputTokens ?? 0}`}
         />
         {isStreaming && (
           <div className="stream-metrics-bar">

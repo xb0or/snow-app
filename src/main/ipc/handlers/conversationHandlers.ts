@@ -186,6 +186,24 @@ export const registerConversationHandlers = (native: NativeBridge): void => {
       return native.previewConversationAttachment(conversationId.trim());
     },
   );
+  // 上下文内核只读状态：输入区状态条用，不触发任何写入。
+  ipcMain.handle(
+    "context-kernel:get-status",
+    async (_event, conversationId: unknown) => {
+      if (typeof conversationId !== "string" || !conversationId.trim()) {
+        return null;
+      }
+      const raw = await native.getContextKernelStatus(conversationId.trim());
+      if (!raw) {
+        return null;
+      }
+      try {
+        return JSON.parse(raw) as unknown;
+      } catch {
+        return null;
+      }
+    },
+  );
   ipcMain.handle(
     "chat-conversations:generate-summary",
     async (_event, conversationId: unknown, basicModel?: unknown) => {

@@ -158,6 +158,21 @@ impl McpService for ContextKernelService {
             },
             McpTool {
                 server_id: SERVER_ID.to_string(),
+                name: "retrieve".to_string(),
+                description: "Read the original content behind a `[context-kernel:stored ref=...]` placeholder. Large tool results are frozen into placeholders in the outbound view to keep requests small; this tool returns the full stored text by ref.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "ref": {
+                            "type": "string",
+                            "description": "Stored ref from the placeholder header, e.g. \"cr1a2b3c4d5e6f7890\"."
+                        }
+                    },
+                    "required": ["ref"]
+                }),
+            },
+            McpTool {
+                server_id: SERVER_ID.to_string(),
                 name: "acp_status".to_string(),
                 description: "Report the context kernel state: estimated outbound tokens, threshold, whether compression is needed, active blocks, and the stable message refs (newest `refLimit` entries) with role, token estimate, preview, pinned and tailProtected flags. Call it before compress to choose a range.".to_string(),
                 input_schema: json!({
@@ -178,7 +193,7 @@ impl McpService for ContextKernelService {
         Err(Error::new(
             Status::GenericFailure,
             format!(
-                "Tool \"{tool_name}\" of server \"{SERVER_ID}\" requires the async call_mcp_tool path (conversation context). Available tools: [context-kernel-compress, context-kernel-decompress, context-kernel-search_context, context-kernel-acp_status]"
+                "Tool \"{tool_name}\" of server \"{SERVER_ID}\" requires the async call_mcp_tool path (conversation context). Available tools: [context-kernel-compress, context-kernel-decompress, context-kernel-retrieve, context-kernel-search_context, context-kernel-acp_status]"
             ),
         ))
     }

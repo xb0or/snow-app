@@ -1588,6 +1588,57 @@ export function createToolExecutor(
                   // Hook execution failed — continue with tool call
                 }
 
+                // 上下文内核压缩属于「压缩」语义：同样执行 beforeCompress hook，
+                // 让用户配置的压缩策略（warn / decision / abort）对模型主动
+                // 折叠生效，而不是只拦旧的一次性 handoff。
+                if (toolCall.name === "context-kernel-compress") {
+                  try {
+                    const compressHookContext = JSON.stringify({
+                      conversationId: effectiveKey,
+                      isAuto: true,
+                      cwd: sessionDirPath ?? "",
+                    });
+                    const compressHookResult = await runHook(
+                      "beforeCompress",
+                      sessionDirId ?? undefined,
+                      compressHookContext,
+                    );
+                    if (compressHookResult) {
+                      const { outcome } = compressHookResult;
+                      if (outcome.kind === "needsDecision") {
+                        const approved = await awaitHookDecision(
+                          effectiveKey,
+                          currentAssistantMessageId,
+                          compressHookResult.record,
+                        );
+                        if (!approved) {
+                          hookAborted = true;
+                          hookAbortMessage = outcome.message;
+                        }
+                      } else {
+                        ctx.updateSessionMessages(
+                          effectiveKey,
+                          (currentMessages) =>
+                            appendHookExecutionToMessage(
+                              currentMessages,
+                              compressHookResult.record,
+                              currentAssistantMessageId,
+                            ),
+                        );
+                      }
+                      if (outcome.kind === "abort") {
+                        hookAborted = true;
+                        hookAbortMessage = outcome.message;
+                      }
+                      if (outcome.kind === "warn") {
+                        pendingHookWarnings.push(outcome.message);
+                      }
+                    }
+                  } catch {
+                    // Hook execution failed — continue with compression.
+                  }
+                }
+
                 if (hookAborted) {
                   const decisionAbortResult = JSON.stringify({
                     success: false,
