@@ -173,6 +173,71 @@ impl McpService for ContextKernelService {
             },
             McpTool {
                 server_id: SERVER_ID.to_string(),
+                name: "absorb".to_string(),
+                description: "Absorb a span of FINISHED work: same mechanics as `compress`, but the block is marked as absorbed and the summary must state completion (what is done, verified, produced, and where), so later turns can trust it instead of re-verifying. Use it for completed sub-tasks, resolved incidents, finished refactors, or long tool sequences whose outcome is already known. The pair of tool messages behind an absorbed call is hidden from the outbound view once the block exists.\\n\\nRules are identical to `context-kernel-compress` (turn-aligned range, minimum 2 messages, the same permanent protections, layered merging into tier 2/3). Prefer absorb over compress whenever the requirement is 'this is done' rather than 'this is history'.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "from": {
+                            "type": "string",
+                            "description": "First message ref of the range (from context-kernel-acp_status)."
+                        },
+                        "to": {
+                            "type": "string",
+                            "description": "Last message ref of the range (inclusive)."
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Short label, e.g. \"schema 70 migration done\"."
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "Completion-state summary: what was done, how it was verified, where the artifacts are, and what remains explicitly out of scope."
+                        }
+                    },
+                    "required": ["from", "to", "summary"]
+                }),
+            },
+            McpTool {
+                server_id: SERVER_ID.to_string(),
+                name: "acp_rule".to_string(),
+                description: "Persistent folding rules for this conversation: `list` returns them, `add` remembers one, `remove` deletes one. Active rules are injected into every compression nudge and must be honoured in the summaries the model writes (e.g. \"always keep exact file paths\", \"summaries in Chinese\", \"never fold prompts the user repeated\").".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list", "add", "remove"],
+                            "description": "Which operation to run."
+                        },
+                        "rule": {
+                            "type": "string",
+                            "description": "For add: the rule text (max 500 chars). For remove: the exact text to delete."
+                        },
+                        "index": {
+                            "type": "integer",
+                            "description": "For remove: the 0-based index from action=list (alternative to `rule`)."
+                        }
+                    },
+                    "required": ["action"]
+                }),
+            },
+            McpTool {
+                server_id: SERVER_ID.to_string(),
+                name: "acp_cache".to_string(),
+                description: "Fold economics report: raw vs outbound tokens, tokens saved by folding (per block and total), compression ratio, tier breakdown, CCR stored entries, latest observed usage and the current threshold. Read-only; use it to decide whether another fold round is worth it (or whether to raise a block's tier) instead of guessing.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "includeBlocks": {
+                            "type": "boolean",
+                            "description": "Include the per-block breakdown (default true)."
+                        }
+                    }
+                }),
+            },
+            McpTool {
+                server_id: SERVER_ID.to_string(),
                 name: "acp_status".to_string(),
                 description: "Report the context kernel state: estimated outbound tokens (real tokenizer), latest observed upstream usage, threshold, whether compression is needed, active blocks with their tier/children, `highestTier`/`maxTier`, the protected rules in force, and the stable message refs (newest `refLimit` entries) with role, token estimate, preview, pinned/tailProtected/compressed flags. Call it before compress to choose a range.".to_string(),
                 input_schema: json!({
@@ -193,7 +258,7 @@ impl McpService for ContextKernelService {
         Err(Error::new(
             Status::GenericFailure,
             format!(
-                "Tool \"{tool_name}\" of server \"{SERVER_ID}\" requires the async call_mcp_tool path (conversation context). Available tools: [context-kernel-compress, context-kernel-decompress, context-kernel-retrieve, context-kernel-search_context, context-kernel-acp_status]"
+                "Tool \"{tool_name}\" of server \"{SERVER_ID}\" requires the async call_mcp_tool path (conversation context). Available tools: [context-kernel-compress, context-kernel-absorb, context-kernel-decompress, context-kernel-retrieve, context-kernel-search_context, context-kernel-acp_status, context-kernel-acp_cache, context-kernel-acp_rule]"
             ),
         ))
     }

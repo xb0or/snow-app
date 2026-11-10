@@ -5261,6 +5261,8 @@ export const en = {
   "chat.contextKernelBlockMeta": "{messages} msgs · {tokens} tokens",
   "chat.contextKernelTier": "tier {tier}/{max}",
   "chat.contextKernelMerged": "merged {count}",
+  "chat.contextKernelAbsorbed": "{count} absorbed",
+  "chat.contextKernelSaved": "{tokens} saved",
   "chat.compactionSummary": "Context summary",
   "chat.compactionExpand": "View summary",
   "chat.compactionCollapse": "Hide summary",

@@ -4917,6 +4917,8 @@ export const zhCN = {
   "chat.contextKernelBlockMeta": "{messages} 条 · {tokens} tokens",
   "chat.contextKernelTier": "层级 {tier}/{max}",
   "chat.contextKernelMerged": "合并 {count} 块",
+  "chat.contextKernelAbsorbed": "{count} 条已完成",
+  "chat.contextKernelSaved": "已省 {tokens}",
   "chat.compactionSummary": "上下文摘要",
   "chat.compactionExpand": "查看摘要",
   "chat.compactionCollapse": "收起摘要",

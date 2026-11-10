@@ -548,8 +548,11 @@ These tools change only the outbound message view — stored history, the UI and
 
 | Tool name                       | Purpose                                                                                                                                                              | Key parameters                                                       |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `context-kernel-acp_status`     | Report outbound token estimate, threshold, whether compression is needed, active blocks, and stable refs for recent messages                                         | `refLimit` (4-200, default 40)                                       |
+| `context-kernel-acp_status`     | Report outbound token estimate, threshold, whether compression is needed, active blocks, suggested turn-aligned ranges, and stable refs for recent messages          | `refLimit` (4-200, default 40)                                       |
 | `context-kernel-compress`       | Cover a contiguous run of older messages with a self-contained model-written summary (tier 1); a range that fully contains existing blocks merges them into tier 2/3 | `from`, `to` (message refs, required), `summary` (required), `title` |
+| `context-kernel-absorb`         | Absorb FINISHED work that no longer needs re-verification into an `absorbed` block (completion-state summary)                                                        | `from`, `to`, `summary` (required), `title`                          |
+| `context-kernel-acp_rule`       | Persistent folding rules: `list` / `add` / `remove`; active rules are injected into every nudge                                                                      | `action` (required), `rule`, `index`                                 |
+| `context-kernel-acp_cache`      | Fold economics: raw vs outbound tokens, per-block and total savings, compression ratio, tier breakdown, CCR stored stats                                             | `includeBlocks` (default true)                                       |
 | `context-kernel-decompress`     | Drop a block so its original messages become visible to the model again                                                                                              | `blockId` (e.g. `b1`)                                                |
 | `context-kernel-retrieve`       | Read the original tool output behind a `[context-kernel:stored ...]` placeholder                                                                                     | `ref` (e.g. `cr1a2b3c4d5e6f7890`)                                    |
 | `context-kernel-search_context` | Keyword search across the full transcript (including messages hidden behind blocks) and block summaries                                                              | `query` (required), `limit` (1-30, default 8)                        |
@@ -571,7 +574,25 @@ Rules:
   context-kernel tool messages; ranges that split an assistant tool call from its result are
   rejected too.
 - Token estimates use a real tokenizer (o200k_base); the nudge threshold compares the
-  estimate against the latest assistant response's recorded usage and uses the larger one.
+  estimate against the latest assistant response's recorded usage (skipping pure tool-call
+  rows without a usage snapshot) and uses the larger one.
+- Turn alignment: a folded range is expanded outward to whole turns (a user message opens a
+  turn; the assistant and its tool calls/results belong to it). `snappedToTurns` marks a
+  range that was expanded. `acp_status` also returns `suggestedRanges` — turn-aligned and
+  already checked against every protection rule, so the model can copy one directly.
+- Ref rendering: user/assistant text in the outbound view is prefixed with `[m…] ` (tool
+  messages are not), so the model can reference messages without calling acp_status; the
+  prefix comes from the content hash and is byte-stable across turns.
+- Consumed calls are hidden: once a block's summary is live, the compress/absorb call that
+  created it (assistant tool_call + tool result) is removed from the outbound view in pairs.
+- Long tool results: >= 4000 chars become a `[context-kernel:stored …]` placeholder; >= 12000
+  chars are first typologically crushed (JSON arrays/objects fold to structure + samples,
+  logs keep head and tail) while the original stays retrievable.
+- Fold journal: every fold/merge/absorb/decompress is appended to `context_kernel_folds`; if
+  the state row is lost, corrupted, or history was reset, the state is replayed from the
+  journal (absorb flags and tiers included).
+- absorb: same mechanics as compress, but the block is flagged `absorbed` and the summary
+  states completion; `acp_status.absorbedBlocks` and `acp_cache` report it separately.
 - A block's summary message is byte-stable in later turns, so the prefix before the block
   keeps hitting the prompt cache.
 - CCR: a single tool result longer than 4000 chars is replaced in the outbound view by a

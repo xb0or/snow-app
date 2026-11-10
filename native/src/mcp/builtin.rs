@@ -122,10 +122,13 @@ pub const READONLY_TOOL_NAMES: &[&str] = &[
     "toolSearch-tool-search",
     // 上下文内核：只改出站视图状态（压缩块），不写工作区，全部免审批。
     "context-kernel-compress",
+    "context-kernel-absorb",
     "context-kernel-decompress",
     "context-kernel-retrieve",
     "context-kernel-search_context",
     "context-kernel-acp_status",
+    "context-kernel-acp_cache",
+    "context-kernel-acp_rule",
 ];
 
 /// 返回仍注册在案的只读工具全名（过滤掉已删除/改名工具的过期条目）。

@@ -786,10 +786,21 @@ state_json, store_json, updated_at)`，按会话 + 子代理隔离，随会话�
 - 阈值：复用 `autoCompressThreshold`（未配置时取 `maxContextTokens` 的 60%）。
   token 估算走真实分词器（o200k_base），判定取“估算值”与“最近一次真实 usage”的较大
   值；达到阈值时在出站尾部追加 nudge（含当前最高层级提示），只存在于出站视图、不落库。
-- 工具：`context-kernel-acp_status` / `compress` / `decompress` / `retrieve` /
-  `search_context`，全部只读免审批；工具执行前后经 `call_mcp_tool` 注入当前会话，
-  模型无法跨会话操作。`compress` 在渲染层还会额外执行 `beforeCompress` hook，
-  支持 warn / decision / abort。
+- 工具：`context-kernel-acp_status` / `compress` / `absorb` / `decompress` / `retrieve` /
+  `search_context` / `acp_cache` / `acp_rule`，全部只读免审批；工具执行前后经
+  `call_mcp_tool` 注入当前会话，模型无法跨会话操作。`compress` 在渲染层还会额外执行
+  `beforeCompress` hook，支持 warn / decision / abort。
+- 轮对齐与建议区间：折叠范围向外扩张到整轮（`snappedToTurns`）；`acp_status` 返回
+  `suggestedRanges`（已按轮对齐 + 逐条校验保护规则），模型可直接照抄，减少试错。
+- ref 渲染：出站视图给 user/assistant 文本加 `[m…] ` 前缀（工具消息不加），
+  前缀由内容哈希决定，跨轮字节稳定。
+- 已消费调用隐藏：块摘要生效后，产生它的 compress/absorb 调用成对移出出站视图。
+- 超长工具结果：≥4000 字符占位；≥12000 字符先做类型化压缩（JSON 结构 + 样例、
+  日志首尾），原文仍可 retrieve。
+- 折叠日志与重建：`context_kernel_folds`（schema 71）记录 fold / merge / absorb /
+  decompress；状态行丢失或损坏时按日志重放重建状态（含 absorb 标记与层级）。
+- 折叠经济学：`acp_cache` 与状态里的 `tokensSavedByFolding`、层级分布、压缩比；
+  UI 状态条展示块数、层级、占位数与用量。
 - CCR（可选能力强项）：单条工具结果超过 4000 字符时，出站视图用由内容哈希生成的
   `[context-kernel:stored ref=cr…]` 占位符替换；原文写入有界 content store
   （400k 字符上限），占位符生成即冻结，后续轮次字节一致，前缀缓存不受影响。

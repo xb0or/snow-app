@@ -17,6 +17,8 @@ use super::{
 
 /// Bumped whenever the schema changes; written to `PRAGMA user_version` after
 /// a successful `create_schema` so the app can detect stale databases.
+/// 71: context_kernel_folds journal (append-only fold/merge/decompress log used
+/// to rebuild kernel state after state loss, rollback, or fork).
 /// 70: context_kernel_state table (billion-context incremental folding state,
 /// scoped by conversation + sub-agent; cascade-deleted with the conversation).
 /// 69: chat message origin, preserving unknown provenance for existing rows.
@@ -65,7 +67,7 @@ use super::{
 /// 32: api_configs canonical config_json migration plus conversation runtime config columns.
 /// 31: main's scheduled-tasks pre-script migration (30) + PR #65's three
 /// stream-interruption migrations (29 baseline + 4 total additions).
-const CURRENT_SCHEMA_VERSION: i64 = 70;
+const CURRENT_SCHEMA_VERSION: i64 = 71;
 const SNOWFLAKE_EPOCH_MS: u64 = 1_704_067_200_000;
 const SNOWFLAKE_WORKER_ID_BITS: u64 = 10;
 const SNOWFLAKE_SEQUENCE_BITS: u64 = 12;
@@ -1400,6 +1402,27 @@ CREATE TABLE IF NOT EXISTS app_plugins (
             PRIMARY KEY (conversation_id, sub_agent_id),
             FOREIGN KEY(conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE
           );
+
+          -- 上下文内核折叠日志（append-only）：fold / merge / decompress 事件，
+          -- 状态行丢失或损坏时按顺序重放即可重建 CompressionState。
+          CREATE TABLE IF NOT EXISTS context_kernel_folds (
+            id TEXT PRIMARY KEY NOT NULL,
+            conversation_id TEXT NOT NULL,
+            sub_agent_id TEXT NOT NULL DEFAULT '',
+            event TEXT NOT NULL,
+            block_id TEXT NOT NULL,
+            parent_block_id TEXT NOT NULL DEFAULT '',
+            tier INTEGER NOT NULL DEFAULT 1,
+            title TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            message_ids_json TEXT NOT NULL DEFAULT '[]',
+            tokens_before INTEGER NOT NULL DEFAULT 0,
+            tokens_after INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY(conversation_id) REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS idx_context_kernel_folds_conversation
+            ON context_kernel_folds(conversation_id, sub_agent_id, id ASC);
      ",
     )?;
 

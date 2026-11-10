@@ -126,6 +126,26 @@ export const ContextKernelStatusBar = ({
             </span>
           </>
         ) : null}
+        {(status.absorbedBlocks ?? 0) > 0 ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>
+              {t("chat.contextKernelAbsorbed", {
+                defaultValue: "{count} 条已完成",
+              }).replace("{count}", String(status.absorbedBlocks))}
+            </span>
+          </>
+        ) : null}
+        {(status.tokensSavedByFolding ?? 0) > 0 ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>
+              {t("chat.contextKernelSaved", {
+                defaultValue: "已省 {tokens}",
+              }).replace("{tokens}", formatTokens(status.tokensSavedByFolding))}
+            </span>
+          </>
+        ) : null}
         <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           <button
             type="button"
