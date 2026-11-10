@@ -2959,14 +2959,137 @@ pub fn status_snapshot(database_path: &Path, conversation_id: &str) -> Result<Va
     )
 }
 
-/// 子代理会话键：子代理请求使用自己的 conversation id，这里额外带上前缀，
-/// 避免同一 conversation 的父/子视图共用状态。
-pub fn sub_agent_key(is_sub_agent: bool, conversation_id: &str) -> String {
-    if is_sub_agent {
-        format!("sub:{conversation_id}")
-    } else {
-        String::new()
+/// 子代理状态键。
+///
+/// 隔离粒度是**运行（run）**而不是会话：同一个子代理会话可以被多次派发（重试、
+/// 追加消息、重新发起），每次派发都是独立的一次运行，它们的折叠状态必须互不污染。
+/// 子代理运行的台账在 `sub_agent_runs`，因此键取 `sub:{runId}`；拿不到 run id
+/// （老数据、台账被裁剪）才回落到 `sub:{conversationId}` —— 无论哪条路径，都绝不与
+/// 父会话共用状态。
+pub fn sub_agent_key(is_sub_agent: bool, conversation_id: &str, run_id: Option<&str>) -> String {
+    if !is_sub_agent {
+        return String::new();
     }
+    match run_id.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(run_id) => format!("sub:{run_id}"),
+        None => format!("sub:{conversation_id}"),
+    }
+}
+
+/// 解析子代理状态键：优先请求显式传入的 run id，其次从运行台账里查该子代理会话的
+/// **最新一次运行**，最后回落到会话级键。
+///
+/// 顺带清理该会话下「对应运行已消失」的孤儿桶（运行行被删除后那些桶再也不会被读到）。
+pub fn resolve_sub_agent_key(
+    database_path: &Path,
+    conversation_id: &str,
+    explicit_run_id: Option<&str>,
+) -> String {
+    if conversation_id.trim().is_empty() {
+        return String::new();
+    }
+    let run_id = explicit_run_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| latest_sub_agent_run_id(database_path, conversation_id));
+    let key = match run_id.as_deref() {
+        Some(run_id) => format!("sub:{run_id}"),
+        None => format!("sub:{conversation_id}"),
+    };
+    prune_orphan_sub_agent_states(database_path, conversation_id, &key);
+    key
+}
+
+/// 该子代理会话最新一次运行 id（`accepted_at` 倒序，与台账读取口径一致）。
+fn latest_sub_agent_run_id(database_path: &Path, conversation_id: &str) -> Option<String> {
+    let connection = database::open_connection(database_path).ok()?;
+    connection
+        .query_row(
+            "SELECT run_id FROM sub_agent_runs
+              WHERE conversation_id = ?1
+              ORDER BY accepted_at DESC, rowid DESC
+              LIMIT 1",
+            rusqlite::params![conversation_id],
+            |row| row.get(0),
+        )
+        .ok()
+}
+
+/// 清理孤儿桶：该会话下带 `sub:` 前缀、但对应运行已不存在的状态行。
+///
+/// 只动「运行已消失」的桶 —— `keep`（本次生效的键）以及并发中仍在台账里的其他运行
+/// 都保留，避免误删活跃派发的状态。
+fn prune_orphan_sub_agent_states(database_path: &Path, conversation_id: &str, keep: &str) {
+    let Ok(connection) = database::open_connection(database_path) else {
+        return;
+    };
+    let sub_agent_ids: Vec<String> = connection
+        .prepare(
+            "SELECT sub_agent_id FROM context_kernel_state
+              WHERE conversation_id = ?1 AND sub_agent_id LIKE 'sub:%'",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map(rusqlite::params![conversation_id], |row| {
+                    row.get::<_, String>(0)
+                })
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        })
+        .unwrap_or_default();
+    for sub_agent_id in sub_agent_ids {
+        if sub_agent_id == keep {
+            continue;
+        }
+        let Some(run_id) = sub_agent_id.strip_prefix("sub:") else {
+            continue;
+        };
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sub_agent_runs WHERE run_id = ?1)",
+                rusqlite::params![run_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(true);
+        if exists {
+            continue;
+        }
+        let _ = connection.execute(
+            "DELETE FROM context_kernel_state WHERE conversation_id = ?1 AND sub_agent_id = ?2",
+            rusqlite::params![conversation_id, sub_agent_id],
+        );
+        let _ = connection.execute(
+            "DELETE FROM context_kernel_folds WHERE conversation_id = ?1 AND sub_agent_id = ?2",
+            rusqlite::params![conversation_id, sub_agent_id],
+        );
+    }
+}
+
+/// 会话删除 / 归档时清理该会话的**全部**内核状态（父视图 + 所有运行桶）。
+pub fn clear_conversation_state(database_path: &Path, conversation_id: &str) -> Result<()> {
+    if conversation_id.trim().is_empty() {
+        return Ok(());
+    }
+    let connection = database::open_connection(database_path).map_err(|error| {
+        database::database_error(database_path, "open context kernel state", error)
+    })?;
+    connection
+        .execute(
+            "DELETE FROM context_kernel_state WHERE conversation_id = ?1",
+            rusqlite::params![conversation_id],
+        )
+        .map_err(|error| {
+            database::database_error(database_path, "clear context kernel state", error)
+        })?;
+    connection
+        .execute(
+            "DELETE FROM context_kernel_folds WHERE conversation_id = ?1",
+            rusqlite::params![conversation_id],
+        )
+        .map_err(|error| {
+            database::database_error(database_path, "clear context kernel folds", error)
+        })?;
+    Ok(())
 }
 
 /// 计算用于出站折叠的阈值：优先 `autoCompressThreshold`，其次上下文的 60%。

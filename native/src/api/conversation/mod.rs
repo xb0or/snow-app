@@ -57,6 +57,15 @@ pub struct ConversationContextRequest<'a> {
     pub workflow_mode: bool,
     /// True when the request belongs to a sub-agent runtime snapshot.
     pub is_sub_agent: bool,
+    /// Sub-agent run id this request belongs to.
+    ///
+    /// Isolation granularity for per-request state (currently the context kernel) is the
+    /// RUN, not the conversation: the same sub-agent conversation can be dispatched more
+    /// than once (retry, queued message, re-activation) and each dispatch is an
+    /// independent run whose folding state must not leak into the next one. When this is
+    /// absent the kernel falls back to the newest run recorded for the conversation in
+    /// the `sub_agent_runs` ledger, and only then to a conversation-scoped key.
+    pub sub_agent_run_id: Option<&'a str>,
     /// Sub-agent-specific system prompt captured at activation.
     pub sub_agent_system_prompt: Option<&'a str>,
     /// JSON-encoded list of user system prompt IDs configured for the active

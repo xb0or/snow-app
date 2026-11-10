@@ -737,8 +737,17 @@ pub async fn prepare_context_request(
         && !request.context_compaction
         && !request.resume_after_compaction
     {
-        let sub_agent_id =
-            super::context_kernel::sub_agent_key(request.is_sub_agent, &conversation_id);
+        // 子代理的状态键按**运行（run）**隔离：同一个子代理会话可以被多次派发，
+        // 每次派发的折叠状态互不污染。run id 优先取请求显式字段，否则查运行台账。
+        let sub_agent_id = if request.is_sub_agent {
+            super::context_kernel::resolve_sub_agent_key(
+                request.database_path,
+                &conversation_id,
+                request.sub_agent_run_id,
+            )
+        } else {
+            String::new()
+        };
         let threshold = super::context_kernel::resolve_threshold(
             request.auto_compress_threshold,
             request.max_context_tokens,

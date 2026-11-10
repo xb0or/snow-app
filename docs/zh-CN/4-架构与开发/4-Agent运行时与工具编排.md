@@ -782,7 +782,14 @@ API 档案开启 `contextKernelEnabled` 后，常规对话不再依赖一次性 
   tier3 上限），父块记录 `children`，`folded_into` 标记的子块不再单独出站；
   `decompress` 父块会把子块按原层级重新激活。部分相交的范围被拒绝。
 - 状态：`context_kernel_state(conversation_id, sub_agent_id, kernel_version,
-state_json, store_json, updated_at)`，按会话 + 子代理隔离，随会话级联删除。
+state_json, store_json, updated_at)`，随会话级联删除。
+- 子代理**按运行（run）隔离**：`sub_agent_id` 取 `sub:{runId}`，键解析顺序为
+  ①请求显式透传的 `subAgentRunId`（渲染层传 `slotOwner`，即派发回执的 `runId`）
+  ②`sub_agent_runs` 台账里该子代理会话**最新一次运行** ③回落到 `sub:{conversationId}`。
+  同一个子代理会话被反复派发（重试 / 排队消息 / 重新激活）时每次派发拿到独立桶，
+  上一轮的折叠状态不会泄漏进下一轮；父会话（键为空串）与任一运行桶互不可见。
+  运行行被删除后遗留的孤儿桶在键解析时惰性清理；会话删除 / 批量删除在事务提交后
+  一并清空 `context_kernel_state` 与 `context_kernel_folds`。
 - 阈值：复用 `autoCompressThreshold`（未配置时取 `maxContextTokens` 的 60%）。
   token 估算走真实分词器（o200k_base），判定取“估算值”与“最近一次真实 usage”的较大
   值；达到阈值时在出站尾部追加 nudge（含当前最高层级提示），只存在于出站视图、不落库。

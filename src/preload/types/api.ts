@@ -224,6 +224,15 @@ export type ResponsesApiRequest = {
   subAgentToolsJson?: string | null;
   subAgentSystemPrompt?: string | null;
   subAgentConfigProfile?: string | null;
+  /**
+   * 子代理本次**运行（run）**的 id。
+   *
+   * 需要按运行隔离的请求级状态（当前是上下文内核的折叠状态）以 run 为粒度：同一个
+   * 子代理会话可能被多次派发（重试、排队消息、重新激活），每次派发都是独立的一次
+   * 运行。这里显式透传时优先使用；缺省时后端从 `sub_agent_runs` 台账取该会话最新
+   * 一次运行。
+   */
+  subAgentRunId?: string | null;
   skipContext?: boolean | null;
   /** Preserve normal conversation context but omit MCP tools for this request. */
   disableTools?: boolean | null;

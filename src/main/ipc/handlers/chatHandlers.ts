@@ -138,6 +138,10 @@ const normalizeResponsesApiRequest = (value: unknown): ResponsesApiRequest => {
       typeof source.subAgentConfigProfile === "string"
         ? source.subAgentConfigProfile
         : undefined,
+    subAgentRunId:
+      typeof source.subAgentRunId === "string" && source.subAgentRunId.trim()
+        ? source.subAgentRunId
+        : undefined,
     skipContext:
       typeof source.skipContext === "boolean" ? source.skipContext : undefined,
     disableTools:

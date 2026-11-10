@@ -773,8 +773,17 @@ The full transcript still goes to `chat_messages`, the UI is unchanged, and only
   children stay marked `folded_into` so they stop rendering on their own; `decompress` on the
   parent reactivates them at their original tier. Partially overlapping ranges are rejected.
 - State: `context_kernel_state(conversation_id, sub_agent_id, kernel_version, state_json,
-store_json, updated_at)`, scoped by conversation + sub-agent and cascade-deleted with the
-  conversation.
+store_json, updated_at)`, cascade-deleted with the conversation.
+- Sub-agents are isolated **per run**: `sub_agent_id` is `sub:{runId}`. The key resolves as
+  ① an explicit `subAgentRunId` on the request (the renderer forwards `slotOwner`, i.e. the
+  `runId` from the dispatch receipt), ② otherwise the **newest run** of that sub-agent
+  conversation in the `sub_agent_runs` ledger, ③ otherwise `sub:{conversationId}`. When the
+  same sub-agent conversation is dispatched repeatedly (retry, queued message,
+  re-activation) every dispatch gets its own bucket, so a previous run's folding state never
+  leaks into the next one; the parent conversation (empty key) and any run bucket are
+  mutually invisible. Orphan buckets whose run row is gone are pruned lazily while resolving
+  the key, and conversation delete / bulk delete clears both `context_kernel_state` and
+  `context_kernel_folds` after the delete transaction commits.
 - Threshold: reuses `autoCompressThreshold` (falling back to 60% of `maxContextTokens`).
   Token estimates use a real tokenizer (o200k_base) and the decision takes the larger of the
   estimate and the latest real usage; when it trips, a nudge (with the current highest tier)

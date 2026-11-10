@@ -86,6 +86,7 @@ fn build_request(image_data_url: &str) -> ResponsesApiRequest {
         // and must not carry any MCP/builtin tools in the payload.
         sub_agent_tools_json: Some("[]".to_string()),
         sub_agent_system_prompt: None,
+        sub_agent_run_id: None,
         sub_agent_config_profile: None,
         // Keep skip_context unset (false) so providers parse the @@image:...@@
         // tag into their native multimodal payloads. An empty conversation_id
