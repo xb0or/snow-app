@@ -792,9 +792,12 @@ store_json, updated_at)`, cascade-deleted with the conversation.
   `search_context` / `acp_cache` / `acp_rule`, all read-only (no approval). `call_mcp_tool`
   injects the current conversation, so the model cannot operate on another one. `compress`
   additionally runs the renderer-side `beforeCompress` hook (warn / decision / abort).
-- Turn alignment and suggestions: folded ranges expand to whole turns (`snappedToTurns`), and
-  `acp_status` returns `suggestedRanges` that are already turn-aligned and checked against
-  every protection rule, so the model can copy one instead of guessing.
+- Turn alignment and suggestions: folded ranges expand to whole turns (`snappedToTurns`) only
+  across messages the protection rules allow (never across the pinned first message, the
+  protected tail, or protected messages), and `acp_status` returns `suggestedRanges` built
+  from maximal contiguous foldable runs with edges shrunk to keep tool call/result pairs
+  whole. In a single-user-turn tool loop the whole conversation is one turn, so whole-turn
+  gating would veto everything; suggestions then land inside the turn, aligned to pairs.
 - Ref rendering: user/assistant text in the outbound view gets a `[m…] ` prefix (tool
   messages do not); the prefix comes from the content hash and is byte-stable across turns.
 - Consumed calls are hidden: once a block's summary is live, the compress/absorb call that

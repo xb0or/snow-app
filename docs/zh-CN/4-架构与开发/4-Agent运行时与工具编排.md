@@ -797,8 +797,11 @@ state_json, store_json, updated_at)`，随会话级联删除。
   `search_context` / `acp_cache` / `acp_rule`，全部只读免审批；工具执行前后经
   `call_mcp_tool` 注入当前会话，模型无法跨会话操作。`compress` 在渲染层还会额外执行
   `beforeCompress` hook，支持 warn / decision / abort。
-- 轮对齐与建议区间：折叠范围向外扩张到整轮（`snappedToTurns`）；`acp_status` 返回
-  `suggestedRanges`（已按轮对齐 + 逐条校验保护规则），模型可直接照抄，减少试错。
+- 轮对齐与建议区间：折叠范围在不越过保护边界（pin / 尾部保护 / 受保护消息）的前提下
+  向外扩张到整轮（`snappedToTurns`）；`acp_status` 返回 `suggestedRanges`（最大连续
+  可折叠段 + 工具对完整性边缘收缩 + 逐条校验保护规则），模型可直接照抄，减少试错。
+  单条用户指令的长工具循环里整个会话只有一轮，整轮判定会被 pin 与尾部保护联手否决，
+  因此建议区间允许落在轮内、按工具对对齐。
 - ref 渲染：出站视图给 user/assistant 文本加 `[m…] ` 前缀（工具消息不加），
   前缀由内容哈希决定，跨轮字节稳定。
 - 已消费调用隐藏：块摘要生效后，产生它的 compress/absorb 调用成对移出出站视图。

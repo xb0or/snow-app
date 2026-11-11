@@ -325,6 +325,61 @@ if (!routing) {
   });
 }
 
+// ---- 建议区间选取（真机第三轮回归：单用户轮 + 工具循环曾返回空 suggestedRanges）----
+const selection = actual.range_selection;
+if (!selection) {
+  failures.push("range_selection: MISSING from Rust output");
+} else {
+  const single = selection.singleTurn.ranges;
+  if (single.length !== 1) {
+    failures.push(
+      `range_selection.singleTurn.ranges: expected exactly 1 range, got ${JSON.stringify(single)}`,
+    );
+  } else {
+    const range = single[0];
+    if (range.from !== 1 || range.to !== 2)
+      failures.push(
+        `range_selection.singleTurn.ranges[0]: expected from=1,to=2, got ${range.from},${range.to}`,
+      );
+    if (range.messages !== 2)
+      failures.push(
+        `range_selection.singleTurn.ranges[0].messages: ${range.messages}`,
+      );
+    if (range.roles[0] !== "assistant" || range.roles[1] !== "tool")
+      failures.push(
+        `range_selection.singleTurn.ranges[0].roles: ${JSON.stringify(range.roles)}`,
+      );
+    if (range.splitsPair !== false)
+      failures.push(
+        "range_selection.singleTurn.ranges[0].splitsPair: expected false",
+      );
+    if (!(range.tokens >= 800))
+      failures.push(
+        `range_selection.singleTurn.ranges[0].tokens: ${range.tokens} < 800`,
+      );
+  }
+  const expand = selection.singleTurn.expandFirst;
+  if (expand[0] !== 1 || expand[1] !== 2)
+    failures.push(
+      `range_selection.singleTurn.expandFirst: expected [1,2], got ${JSON.stringify(expand)}`,
+    );
+  const multi = selection.multiTurn.ranges;
+  if (multi.length !== 1 || multi[0].from !== 1 || multi[0].to !== 5) {
+    failures.push(
+      `range_selection.multiTurn.ranges: expected 1 range [1,5], got ${JSON.stringify(multi)}`,
+    );
+  } else if (multi[0].splitsPair !== false) {
+    failures.push(
+      "range_selection.multiTurn.ranges[0].splitsPair: expected false",
+    );
+  }
+  const forward = selection.multiTurn.expandForward;
+  if (forward[0] !== 1 || forward[1] !== 4)
+    failures.push(
+      `range_selection.multiTurn.expandForward: expected [1,4], got ${JSON.stringify(forward)}`,
+    );
+}
+
 if (failures.length > 0) {
   console.log(`BEHAVIOR VERIFY FAILED — ${failures.length} mismatch(es):`);
   for (const line of failures) console.log("  - " + line);

@@ -579,9 +579,13 @@ Rules:
   estimate against the latest assistant response's recorded usage (skipping pure tool-call
   rows without a usage snapshot) and uses the larger one.
 - Turn alignment: a folded range is expanded outward to whole turns (a user message opens a
-  turn; the assistant and its tool calls/results belong to it). `snappedToTurns` marks a
-  range that was expanded. `acp_status` also returns `suggestedRanges` — turn-aligned and
-  already checked against every protection rule, so the model can copy one directly.
+  turn; the assistant and its tool calls/results belong to it), but only across messages the
+  protection rules allow — expansion never crosses the pinned first message, the protected
+  tail, or permanently protected messages. `snappedToTurns` marks a range that was expanded.
+  `acp_status` also returns `suggestedRanges` — maximal contiguous foldable runs whose edges
+  are shrunk inward to keep tool call/result pairs whole, already checked against every
+  protection rule, so the model can copy one directly. In a single-user-turn tool loop the
+  suggestion lands inside the turn instead of covering the whole turn.
 - Ref rendering: user/assistant text in the outbound view is prefixed with `[m…] ` (tool
   messages are not), so the model can reference messages without calling acp_status; the
   prefix comes from the content hash and is byte-stable across turns.
