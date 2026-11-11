@@ -1867,6 +1867,11 @@ fn fingerprint(message: &ChatContextMessage) -> String {
 
 /// 出站视图入口：验证块、折叠历史、必要时追加 nudge。
 ///
+/// `tools_available` 表示**本次请求的工具列表里确实带着内核工具**。为 false 时
+/// （子代理白名单、`disable_tools`、精简模式、服务器被禁用等）只做被动的折叠与
+/// CCR，**绝不注入 nudge / absorb 提示** —— 那些提示会命令模型去调用它根本调不到
+/// 的工具，模型只会反复重试并报错。
+///
 /// 失败时直接返回原历史（上下文管理不能阻断请求）；调用方采用返回值。
 pub fn apply_outgoing_view(
     database_path: &Path,
@@ -1874,6 +1879,7 @@ pub fn apply_outgoing_view(
     sub_agent_id: &str,
     threshold_tokens: Option<i64>,
     observed_tokens: Option<i64>,
+    tools_available: bool,
     messages: &mut Vec<ChatContextMessage>,
 ) -> Result<i64> {
     if conversation_id.trim().is_empty() {
@@ -1911,7 +1917,8 @@ pub fn apply_outgoing_view(
         }
     }
     // absorb：给够大的工具结果追加强制吸收提示（每轮视图专用，绝不持久化）。默认关闭。
-    if cfg.absorb.enabled {
+    // 工具不可用时同样跳过：提示会要求模型调用它调不到的 absorb 工具。
+    if cfg.absorb.enabled && tools_available {
         let refs: Vec<String> = HistoryView::build(folded.clone())
             .refs
             .iter()
@@ -1959,11 +1966,14 @@ pub fn apply_outgoing_view(
         }
     }
     let threshold = threshold_tokens.filter(|value| *value > 0);
-    // 子代理没有内核工具（不在其工具白名单内），nudge 只会变成噪声；只折叠可用块。
+    // nudge 只有在「本次请求真的带着内核工具」时才有意义：
+    // - 子代理的工具白名单里没有内核工具；
+    // - `disable_tools` / 精简模式 / 内核服务器被项目禁用时也没有。
+    // 这些情况下 nudge 会命令模型调用调不到的工具，模型只会空转重试，所以直接不注入。
     if let Some(threshold) = threshold {
         // 真实 usage 优先：估算器只补足上游没给 usage 的情况。
         let effective = tokens.max(observed_tokens.unwrap_or(0));
-        if effective >= threshold && sub_agent_id.is_empty() {
+        if effective >= threshold && sub_agent_id.is_empty() && tools_available {
             let highest_tier = state
                 .blocks
                 .iter()

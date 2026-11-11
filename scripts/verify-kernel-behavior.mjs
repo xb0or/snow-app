@@ -284,6 +284,47 @@ check("decompose_sample", {
   foldIndex: null,
 });
 
+// ---- tool routing（回归：server_id 自带连字符必须被正确拆分）----
+const routing = actual.tool_routing;
+if (!routing) {
+  failures.push("tool_routing: MISSING from Rust output");
+} else {
+  const expectedTools = [
+    "compress",
+    "absorb",
+    "decompress",
+    "retrieve",
+    "search_context",
+    "acp_status",
+    "acp_cache",
+    "acp_rule",
+    "recap",
+    "handoff",
+  ];
+  routing.split.forEach((value, index) => {
+    const expected = ["context-kernel", expectedTools[index]];
+    if (!eq(value, expected)) {
+      failures.push(
+        `tool_routing.split[${index}]: expected ${JSON.stringify(expected)}, got ${JSON.stringify(value)}`,
+      );
+    }
+  });
+  routing.in_builtin_list.forEach((value, index) => {
+    if (value !== true) {
+      failures.push(
+        `tool_routing.in_builtin_list[${index}] (${expectedTools[index]}): false`,
+      );
+    }
+  });
+  routing.recognised_as_kernel.forEach((value, index) => {
+    if (value !== true) {
+      failures.push(
+        `tool_routing.recognised_as_kernel[${index}] (${expectedTools[index]}): false`,
+      );
+    }
+  });
+}
+
 if (failures.length > 0) {
   console.log(`BEHAVIOR VERIFY FAILED — ${failures.length} mismatch(es):`);
   for (const line of failures) console.log("  - " + line);
