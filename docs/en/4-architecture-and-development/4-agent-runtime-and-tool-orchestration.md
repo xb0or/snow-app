@@ -799,15 +799,30 @@ store_json, updated_at)`, cascade-deleted with the conversation.
   messages do not); the prefix comes from the content hash and is byte-stable across turns.
 - Consumed calls are hidden: once a block's summary is live, the compress/absorb call that
   produced it is removed from the outbound view as a pair.
-- Long tool results: >= 4000 chars become a placeholder; >= 12000 chars are first typologically
-  crushed (JSON structure + samples, log head/tail) while the original stays retrievable.
+- Long tool results (**off by default**, `ccr.enabled=false`, matching upstream's
+  `DEFAULT_CCR_CONFIG`): when enabled, results >= 16000 chars (the char equivalent of
+  upstream's `minToolTokens=4000` tokens) become placeholders and results >= 12000 chars are
+  first typologically crushed (JSON structure + samples, log head/tail) while the original
+  stays retrievable. **Kernel-tool messages are never stored**: status / cache / retrieve
+  returns are metadata the model must read immediately — a placeholder hides the ref list,
+  and a retrieve return (original + framing) is larger than the original, which recurses
+  (observed nesting 4 levels deep). Retrieve uses the **export branch** for originals above
+  the inline threshold: the text is written to
+  `<storage>/context-kernel-exports/<ref>.txt` and a pointer is returned, so the model pages
+  through it with its own file-read tool and retrieval never re-inflates the conversation.
+- Nudge gating: the nudge is injected only when the request actually carries the kernel
+  tools **and a foldable range exists**. When no range is foldable (CCR/crush already moved
+  the large outputs out of the view, or every range hits a protection rule) the nudge would
+  be a false alarm that folding cannot clear — the observed figure can stay at the
+  pre-fold value, so the current view's actual foldability decides.
 - Fold journal and rebuild: `context_kernel_folds` (schema 71) records fold / merge / absorb /
   decompress; if the state row is lost or corrupted the state is replayed from the journal,
   absorb flags and tiers included.
 - Fold economics: `acp_cache` plus `tokensSavedByFolding`, tier breakdown and compression
   ratio in the status payload; the composer status bar shows blocks, tier, stored refs and
   token usage.
-- CCR: a single tool result longer than 4000 chars is replaced in the outbound view by a
+- CCR (**off by default**; effective only when enabled): a single tool result longer than
+  16000 chars is replaced in the outbound view by a
   content-hash-derived `[context-kernel:stored ref=cr…]` placeholder; the original goes into
   a bounded content store (400k chars). Placeholders are frozen once created, so later turns
   produce identical bytes and prefix caching keeps working.
