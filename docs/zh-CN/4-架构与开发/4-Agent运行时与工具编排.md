@@ -802,13 +802,23 @@ state_json, store_json, updated_at)`，随会话级联删除。
 - ref 渲染：出站视图给 user/assistant 文本加 `[m…] ` 前缀（工具消息不加），
   前缀由内容哈希决定，跨轮字节稳定。
 - 已消费调用隐藏：块摘要生效后，产生它的 compress/absorb 调用成对移出出站视图。
-- 超长工具结果：≥4000 字符占位；≥12000 字符先做类型化压缩（JSON 结构 + 样例、
-  日志首尾），原文仍可 retrieve。
+- 超长工具结果（**默认关闭**，`ccr.enabled=false`，与上游 `DEFAULT_CCR_CONFIG` 一致）：
+  开启后 ≥16000 字符（上游 `minToolTokens=4000` token 的字符口径）占位、≥12000 字符先做
+  类型化压缩（JSON 结构 + 样例、日志首尾），原文仍可 retrieve。**内核自身工具的消息永不
+  入店**：status / cache / retrieve 的返回值是模型必须立即读取的元数据，一旦被占位模型就
+  拿不到 ref 列表；且 retrieve 的返回（原文 + 框架）比原文更大，会形成递归存储。
+  retrieve 对超过内联阈值的原文走**导出分支**：落成
+  `<storage>/context-kernel-exports/<ref>.txt` 并返回指针，模型用读文件工具按
+  offset/limit 翻页 —— 取回永远不把会话重新灌大。
+- nudge 门控：只有「本次请求真的带着内核工具」**且「真的存在可折叠区间」**才注入。
+  可折叠区间为空时（CCR/crush 已把大输出移出视图，或所有区间都撞保护规则），nudge 是
+  无法通过折叠消除的误报 —— observed 口径可能停留在折叠前的大值上，以当前视图的
+  实际可折叠性为准。
 - 折叠日志与重建：`context_kernel_folds`（schema 71）记录 fold / merge / absorb /
   decompress；状态行丢失或损坏时按日志重放重建状态（含 absorb 标记与层级）。
 - 折叠经济学：`acp_cache` 与状态里的 `tokensSavedByFolding`、层级分布、压缩比；
   UI 状态条展示块数、层级、占位数与用量。
-- CCR（可选能力强项）：单条工具结果超过 4000 字符时，出站视图用由内容哈希生成的
+- CCR（**默认关闭**；开启后生效）：单条工具结果超过 16000 字符时，出站视图用由内容哈希生成的
   `[context-kernel:stored ref=cr…]` 占位符替换；原文写入有界 content store
   （400k 字符上限），占位符生成即冻结，后续轮次字节一致，前缀缓存不受影响。
 - UI：输入区上沿状态条展示块数量、出站/阈值 token 与占位条目数，展开可看每个块的
