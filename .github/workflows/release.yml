@@ -86,6 +86,14 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=8192
         run: npm run build:release
 
+      # 内核行为回归：用刚编译出的 native binding 跑 acp-kernel 移植基线
+      # （refs/segments/建议区间选取/工具路由等）。脚本按 win32 产物路径加载，
+      # 只在 Windows 矩阵腿执行；本机内存被虚拟机等占用导致 rustc OOM 时，
+      # 机器验证随 CI 走。
+      - name: Verify context kernel behavior
+        if: matrix.platform == 'win32'
+        run: node scripts/verify-kernel-behavior.mjs
+
       - name: Build electron packages
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"

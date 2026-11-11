@@ -704,34 +704,35 @@ fn estimate_message_tokens(message: &ChatContextMessage) -> i64 {
 
 /// 工具调用 id → (assistant 消息下标, tool 结果消息下标)。
 /// 折叠块不能把一对调用/结果拆开，否则 provider 会因孤立 tool-call 直接 400。
-fn tool_pair_index(messages: &[ChatContextMessage]) -> HashMap<String, (Option<usize>, Option<usize>)> {
-    fn entry_ids(raw: Option<&str>, keys: &[&str]) -> Vec<String> {
-        let Some(raw) = raw else {
-            return Vec::new();
-        };
-        let Ok(value) = serde_json::from_str::<Value>(raw) else {
-            return Vec::new();
-        };
-        value
-            .as_array()
-            .map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|entry| {
-                        keys.iter().find_map(|key| {
-                            entry
-                                .get(*key)
-                                .and_then(Value::as_str)
-                                .map(str::trim)
-                                .filter(|value| !value.is_empty())
-                                .map(ToString::to_string)
-                        })
+/// 从工具调用/结果 JSON 数组里提取 id 字段（键名顺序即优先级）。
+fn entry_ids(raw: Option<&str>, keys: &[&str]) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(raw) else {
+        return Vec::new();
+    };
+    value
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    keys.iter().find_map(|key| {
+                        entry
+                            .get(*key)
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(ToString::to_string)
                     })
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
+fn tool_pair_index(messages: &[ChatContextMessage]) -> HashMap<String, (Option<usize>, Option<usize>)> {
     let mut pairs: HashMap<String, (Option<usize>, Option<usize>)> = HashMap::new();
     for (index, message) in messages.iter().enumerate() {
         match message.role.trim() {
@@ -1297,9 +1298,14 @@ fn turn_spans(messages: &[ChatContextMessage]) -> Vec<(usize, usize)> {
     spans
 }
 
-/// 把范围向外扩张到完整的轮边界（fold 至少覆盖整轮）。
+/// 把范围向外扩张到完整的轮边界；**扩张只跨过全部可用的消息**。
+///
+/// 无差别整轮扩张在单轮会话（一条用户指令 + 长工具循环）里会把子区间撑成整个
+/// 会话，随后必撞 pin / 尾部保护 —— 建议区间反而一条都压不进去（真机第三轮
+/// 踩过）。因此扩张新吞并的每一条消息都必须 `usable`，否则保持原边界。
 fn expand_to_turn_bounds(
     messages: &[ChatContextMessage],
+    usable: &[bool],
     start: usize,
     end: usize,
     cfg: &KernelConfig,
@@ -1310,28 +1316,25 @@ fn expand_to_turn_bounds(
     let mut low = start;
     let mut high = end;
     for (from, to) in turn_spans(messages) {
-        if to >= low && from <= high {
-            low = low.min(from);
-            high = high.max(to);
+        if to < low || from > high {
+            continue;
+        }
+        if from < low && (from..low).all(|index| usable[index]) {
+            low = from;
+        }
+        if to > high && (high + 1..=to).all(|index| usable[index]) {
+            high = to;
         }
     }
     (low, high, low != start || high != end)
 }
 
-/// 候选折叠区间：按轮对齐、排除 pin/尾部/受保护消息，体量达标才返回。
-///
-/// 允许区间包含已有块（那是 tier 升级合并的场景），但要求至少含一条未覆盖
-/// 消息或一个可完整吞掉的块，否则折了也没有收益。
-fn viable_ranges(
-    view: &HistoryView,
-    state: &KernelState,
-    cfg: &KernelConfig,
-) -> Vec<(usize, usize)> {
-    let covered = covered_lookup(state);
+/// 每条消息是否可折叠：不受永久保护（system / 媒体 / 内核工具消息），且不在
+/// pin（首条非 system 消息）与尾部保护区内。
+fn usable_flags(view: &HistoryView, cfg: &KernelConfig) -> Vec<bool> {
     let pinned = view.pinned_index();
     let tail_from = view.tail_protected_from(cfg);
-    let usable: Vec<bool> = view
-        .messages
+    view.messages
         .iter()
         .enumerate()
         .map(|(index, message)| {
@@ -1340,27 +1343,96 @@ fn viable_ranges(
             }
             pinned != Some(index) && index < tail_from
         })
-        .collect();
+        .collect()
+}
 
+/// 区间边缘向内收缩到工具对完整：头部不能是「调用在区间外」的工具结果，尾部
+/// 不能是「结果在区间外」的调用。只缩不放 —— 向外扩会吞进 pin / 尾部保护 /
+/// 受保护消息，宁可少折也不能给出会被 compress 拒绝的建议区间。
+fn trim_pair_edges(
+    messages: &[ChatContextMessage],
+    pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
+    mut from: usize,
+    mut to: usize,
+) -> (usize, usize) {
+    while from <= to {
+        let message = &messages[from];
+        let unmatched_result = message.role.trim() == "tool"
+            && entry_ids(message.tool_results_json.as_deref(), &["callId", "id"])
+                .iter()
+                .any(|id| {
+                    pairs
+                        .get(id)
+                        .is_some_and(|(call, _)| call.is_some_and(|index| index < from))
+                });
+        if unmatched_result {
+            from += 1;
+        } else {
+            break;
+        }
+    }
+    while to >= from {
+        let message = &messages[to];
+        let dangling_call = message.role.trim() == "assistant"
+            && entry_ids(message.tool_calls_json.as_deref(), &["id", "callId"])
+                .iter()
+                .any(|id| {
+                    pairs
+                        .get(id)
+                        .is_some_and(|(_, result)| result.is_some_and(|index| index > to))
+                });
+        if dangling_call {
+            if to == 0 {
+                // 空区间（from > to），调用方按体量过滤掉。
+                return (1, 0);
+            }
+            to -= 1;
+        } else {
+            break;
+        }
+    }
+    (from, to)
+}
+
+/// 候选折叠区间：最大连续可折叠段 + 工具对完整性边缘收缩，排除 pin/尾部/
+/// 受保护消息，体量达标才返回。
+///
+/// 允许区间包含已有块（那是 tier 升级合并的场景），但要求至少含一条未覆盖
+/// 消息或一个可完整吞掉的块，否则折了也没有收益。
+///
+/// 不按「整轮全部可用」判定：单条用户指令的长工具循环里整个会话只有一轮，
+/// 整轮判定会被 pin（轮头）与尾部保护（轮尾）联手否决，`suggestedRanges`
+/// 永远为空 —— 恰恰是折叠最该工作的场景（真机第三轮踩过）。
+fn viable_ranges(
+    view: &HistoryView,
+    state: &KernelState,
+    cfg: &KernelConfig,
+) -> Vec<(usize, usize)> {
+    let covered = covered_lookup(state);
+    let usable = usable_flags(view, cfg);
+
+    // 最大连续可用段（不要求落在整轮边界上）。
     let mut runs: Vec<(usize, usize)> = Vec::new();
     let mut current: Option<(usize, usize)> = None;
-    for (from, to) in turn_spans(&view.messages) {
-        if (from..=to).all(|index| usable[index]) {
+    for (index, ok) in usable.iter().enumerate() {
+        if *ok {
             current = Some(match current {
-                Some((run_start, _)) => (run_start, to),
-                None => (from, to),
+                Some((run_start, _)) => (run_start, index),
+                None => (index, index),
             });
         } else if let Some(run) = current.take() {
             runs.push(run);
         }
     }
-    if let Some(run) = current {
+    if let Some(run) = current.take() {
         runs.push(run);
     }
 
+    let pairs = tool_pair_index(&view.messages);
     runs.into_iter()
+        .map(|(from, to)| trim_pair_edges(&view.messages, &pairs, from, to))
         .filter(|(from, to)| {
-            if to - from + 1 < MIN_COMPRESS_MESSAGES {
+            if *from > *to || to - from + 1 < MIN_COMPRESS_MESSAGES {
                 return false;
             }
             let tokens: i64 = view.refs[*from..=*to].iter().map(|item| item.tokens).sum();
@@ -1396,6 +1468,128 @@ fn turns_in_range(messages: &[ChatContextMessage], start: usize, end: usize) -> 
         .into_iter()
         .filter(|(from, to)| *to >= start && *from <= end)
         .count()
+}
+
+/// 自检探针：建议区间选取（真机第三轮回归 —— 单用户轮 + 工具循环曾给出空
+/// `suggestedRanges`）。纯函数、固定输入，供 `context_kernel_self_test` 与
+/// `scripts/verify-kernel-behavior.mjs` 断言。
+pub(crate) fn self_test_range_selection() -> Value {
+    let filler = "row : payload payload\n".repeat(360);
+    let text = |role: &str, content: &str| ChatContextMessage {
+        role: role.to_string(),
+        origin: String::new(),
+        content: content.to_string(),
+        tool_calls_json: None,
+        tool_results_json: None,
+        thinking: None,
+        thinking_blocks_json: None,
+    };
+    let assistant_call = |id: &str| ChatContextMessage {
+        tool_calls_json: Some(format!(
+            r#"[{{"id":"{id}","name":"bash-terminal-execute"}}]"#
+        )),
+        ..text("assistant", "")
+    };
+    let tool_result = |id: &str| ChatContextMessage {
+        tool_results_json: Some(format!(
+            r#"[{{"callId":"{id}","name":"bash-terminal-execute"}}]"#
+        )),
+        content: filler.clone(),
+        ..text("tool", "")
+    };
+
+    fn describe_range(
+        view: &HistoryView,
+        pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
+        from: usize,
+        to: usize,
+    ) -> Value {
+        json!({
+            "from": from,
+            "to": to,
+            "roles": [view.messages[from].role.trim(), view.messages[to].role.trim()],
+            "messages": to - from + 1,
+            "tokens": view.refs[from..=to].iter().map(|item| item.tokens).sum::<i64>(),
+            "splitsPair": split_tool_pair(pairs, from, to).is_some(),
+        })
+    }
+
+    // 单用户轮（真机场景）：首条 user（pin）+ 2 组工具对 + 填充，共 10 条。
+    // 尾部 6 条受保护 → 可用段 1..=3；message 3 的调用结果落在保护区 →
+    // 边缘收缩后期望区间为 [1,2]（call_a 完整对）。
+    let single_turn = vec![
+        text("user", "按顺序跑四次命令，逐步贴出 JSON。"),
+        assistant_call("call_a"),
+        tool_result("call_a"),
+        ChatContextMessage {
+            content: "第 1 次执行返回的 JSON 已贴。".to_string(),
+            ..assistant_call("call_b")
+        },
+        tool_result("call_b"),
+        text("assistant", "第 2 次执行返回的 JSON 已贴。"),
+        text("assistant", "继续。"),
+        text("assistant", "filler-a"),
+        text("assistant", "filler-b"),
+        text("assistant", "filler-c"),
+    ];
+    // 多轮：3 个完整旧轮 + 尾部，共 12 条。可用段 1..=5，期望整段 [1,5]。
+    let multi_turn = vec![
+        text("user", "第一轮：跑命令。"),
+        assistant_call("call_c"),
+        tool_result("call_c"),
+        text("user", "第二轮：总结。"),
+        text("assistant", "第二轮回答，说明结果。"),
+        text("user", "第三轮：确认。"),
+        assistant_call("call_d"),
+        tool_result("call_d"),
+        text("user", "第四轮：继续。"),
+        text("assistant", "第四轮回答。"),
+        text("user", "第五轮：收尾。"),
+        text("assistant", "第五轮回答。"),
+    ];
+
+    let cfg = KernelConfig::default();
+    let state = KernelState::fresh();
+
+    let single_view = HistoryView::build(single_turn);
+    let single_pairs = tool_pair_index(&single_view.messages);
+    let single_usable = usable_flags(&single_view, &cfg);
+    let single_ranges = viable_ranges(&single_view, &state, &cfg);
+    let (expand_low, expand_high) = match single_ranges.first().copied() {
+        Some((from, to)) => {
+            let (low, high, _) =
+                expand_to_turn_bounds(&single_view.messages, &single_usable, from, to, &cfg);
+            (low, high)
+        }
+        None => (usize::MAX, usize::MAX),
+    };
+
+    let multi_view = HistoryView::build(multi_turn);
+    let multi_pairs = tool_pair_index(&multi_view.messages);
+    let multi_usable = usable_flags(&multi_view, &cfg);
+    let multi_ranges = viable_ranges(&multi_view, &state, &cfg);
+    let (forward_low, forward_high) = {
+        let (low, high, _) =
+            expand_to_turn_bounds(&multi_view.messages, &multi_usable, 1, 3, &cfg);
+        (low, high)
+    };
+
+    json!({
+        "singleTurn": {
+            "ranges": single_ranges
+                .iter()
+                .map(|(from, to)| describe_range(&single_view, &single_pairs, *from, *to))
+                .collect::<Vec<_>>(),
+            "expandFirst": [expand_low, expand_high],
+        },
+        "multiTurn": {
+            "ranges": multi_ranges
+                .iter()
+                .map(|(from, to)| describe_range(&multi_view, &multi_pairs, *from, *to))
+                .collect::<Vec<_>>(),
+            "expandForward": [forward_low, forward_high],
+        },
+    })
 }
 
 /// nudge 优先使用上游真实 usage，估算器只作补充。
@@ -2205,8 +2399,10 @@ fn compress_range(
     } else {
         (to_index, from_index)
     };
-    // 按轮对齐：范围向外扩张到完整的轮，避免把一次交互切成两半。
-    let (start, end, snapped) = expand_to_turn_bounds(&view.messages, start, end, &cfg);
+    // 按轮对齐：在不越过保护边界（pin / 尾部 / 受保护消息）的前提下把范围
+    // 向外扩张到完整的轮，避免把一次交互切成两半。
+    let usable = usable_flags(&view, &cfg);
+    let (start, end, snapped) = expand_to_turn_bounds(&view.messages, &usable, start, end, &cfg);
     let span = end - start + 1;
     if span < MIN_COMPRESS_MESSAGES {
         return Err(Error::new(

@@ -620,6 +620,9 @@ pub fn context_kernel_self_test() -> Result<String> {
         }),
     );
 
+    // ---- 建议区间选取（真机回归：单用户轮 + 工具循环曾返回空 suggestedRanges）----
+    put("range_selection", k::self_test_range_selection());
+
     Ok(serde_json::Value::Object(out).to_string())
 }
 
