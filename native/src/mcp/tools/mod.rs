@@ -168,6 +168,11 @@ pub const BUILTIN_SERVER_IDS: &[&str] = &[
     "memory",
     "html",
     "decision",
+    // 上下文内核：server_id 自带连字符，必须在这里登记，否则
+    // `context-kernel-acp_status` 会被拆成 server="context"、
+    // tool="kernel-acp_status"，落到外部服务器解析分支并以
+    // "MCP tool is no longer available" 失败。
+    "context-kernel",
 ];
 
 /// 精简模式（Lite Mode）禁用的内置服务器 ID。启用精简模式后，这些服务器的
@@ -178,17 +183,30 @@ pub const LITE_MODE_DISABLED_SERVER_IDS: &[&str] =
     &["browser", "app-control", "terminal", "computer-use"];
 
 /// 将工具全名 `{server_id}-{tool_name}` 拆分为 `(server_id, tool_name)`。
-/// 先匹配已知内置 server_id 前缀（最长优先），再回退到首个 `-` 分割
-/// （适用于外部工具，其 server_name 不含 `-`）。
+///
+/// 先按已知内置 server_id 前缀匹配（**最长优先**，因为 server_id 本身可能含连字符，
+/// 例如 `context-kernel`），再回退到首个 `-` 分割（适用于外部工具，其 server_name
+/// 不含 `-`）。
 pub fn split_tool_full_name(full_name: &str) -> Option<(&str, &str)> {
+    let mut best: Option<(&str, &str)> = None;
     for &server_id in BUILTIN_SERVER_IDS {
-        if let Some(rest) = full_name.strip_prefix(server_id) {
-            if let Some(tool_name) = rest.strip_prefix('-') {
-                if !tool_name.is_empty() {
-                    return Some((server_id, tool_name));
-                }
-            }
+        let Some(rest) = full_name.strip_prefix(server_id) else {
+            continue;
+        };
+        let Some(tool_name) = rest.strip_prefix('-') else {
+            continue;
+        };
+        if tool_name.is_empty() {
+            continue;
         }
+        // 最长前缀优先：避免将来出现 `context` 与 `context-kernel` 这类前缀包含关系时
+        // 命中较短的那个。
+        if best.is_none_or(|(current, _)| server_id.len() > current.len()) {
+            best = Some((server_id, tool_name));
+        }
+    }
+    if best.is_some() {
+        return best;
     }
     let (server_id, tool_name) = full_name.split_once('-')?;
     if server_id.is_empty() || tool_name.is_empty() {

@@ -756,12 +756,19 @@ pub async fn prepare_context_request(
         // 估算器只在上游没给用量时补足。
         let observed_tokens =
             super::context_kernel::latest_usage_tokens(request.database_path, &conversation_id);
+        // nudge / absorb 提示只有在本次请求真的带着内核工具时才注入：子代理白名单、
+        // `disable_tools`、精简模式或内核服务器被项目禁用时，提示只会让模型空转。
+        let kernel_tools_available = request
+            .allowed_tools
+            .iter()
+            .any(|tool| super::context_kernel::is_context_kernel_tool(&tool.full_name()));
         if let Err(error) = super::context_kernel::apply_outgoing_view(
             request.database_path,
             &conversation_id,
             &sub_agent_id,
             threshold,
             observed_tokens,
+            kernel_tools_available,
             &mut messages,
         ) {
             // 上下文管理失败绝不能阻断请求：退回未折叠视图。

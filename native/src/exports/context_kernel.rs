@@ -580,6 +580,46 @@ pub fn context_kernel_self_test() -> Result<String> {
         )),
     );
 
+    // ---- 工具路由 ----
+    //
+    // 回归基线：`server_id` 自带连字符（`context-kernel`），它必须在
+    // `BUILTIN_SERVER_IDS` 里登记，否则 `context-kernel-acp_status` 会被拆成
+    // server="context"、tool="kernel-acp_status"，落到外部服务器解析分支并以
+    // "MCP tool is no longer available" 失败（实测踩过一次，10 个工具全废）。
+    let kernel_tools = [
+        "context-kernel-compress",
+        "context-kernel-absorb",
+        "context-kernel-decompress",
+        "context-kernel-retrieve",
+        "context-kernel-search_context",
+        "context-kernel-acp_status",
+        "context-kernel-acp_cache",
+        "context-kernel-acp_rule",
+        "context-kernel-recap",
+        "context-kernel-handoff",
+    ];
+    let builtin_tool_names: Vec<String> = crate::mcp::builtin::get_builtin_tools()
+        .iter()
+        .map(crate::mcp::tools::McpTool::full_name)
+        .collect();
+    put(
+        "tool_routing",
+        json!({
+            "split": kernel_tools
+                .iter()
+                .map(|name| crate::mcp::tools::split_tool_full_name(name))
+                .collect::<Vec<_>>(),
+            "in_builtin_list": kernel_tools
+                .iter()
+                .map(|name| builtin_tool_names.iter().any(|entry| entry == name))
+                .collect::<Vec<_>>(),
+            "recognised_as_kernel": kernel_tools
+                .iter()
+                .map(|name| k::is_context_kernel_tool(name))
+                .collect::<Vec<_>>(),
+        }),
+    );
+
     Ok(serde_json::Value::Object(out).to_string())
 }
 
