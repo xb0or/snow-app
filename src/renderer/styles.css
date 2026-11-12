@@ -6746,6 +6746,12 @@ body.is-panel-resizing * {
   flex: 0 0 auto;
 }
 
+/* 行内操作按钮（清空学习记录）不随文案收缩 */
+.sensitive-command-assist-row > .api-settings-action-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .sensitive-command-assist-number input {
   width: 72px;
   min-height: 28px;
@@ -28896,6 +28902,25 @@ button.user-message-source:hover {
   background: var(--focus-ring);
 }
 
+/* 拖放插入位置指示条（dropCaret.ts，fixed 挂在 body） */
+.chat-drop-caret {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text-primary);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+}
+
+.chat-drop-caret.visible {
+  opacity: 1;
+}
+
 /* ===== 输入框手动高度 / 大屏输入 ===== */
 /* 顶部拖拽把手 */
 .input-resize-handle {
@@ -29730,8 +29755,8 @@ button.user-message-source:hover {
 
 .plus-menu-dropdown {
   position: absolute;
-  min-width: 320px;
-  max-width: 360px;
+  min-width: 200px;
+  max-width: 280px;
   max-height: min(520px, 70vh);
   display: flex;
   flex-direction: column;
@@ -29878,6 +29903,19 @@ button.user-message-source:hover {
   margin: 4px 8px;
   background: var(--border-light);
 }
+
+/* 菜单项外包 Tooltip 时撑满整行 */
+.plus-menu-dropdown .tooltip-wrapper,
+.plus-menu-modes-flyout .tooltip-wrapper {
+  display: flex;
+  width: 100%;
+}
+
+.plus-menu-tooltip-locked {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
 .plus-menu-yolo-item {
   cursor: pointer;
 }
@@ -29917,6 +29955,9 @@ button.user-message-source:hover {
 .plus-menu-modes-flyout {
   position: fixed;
   z-index: 120;
+  width: max-content;
+  min-width: 200px;
+  max-width: 360px;
   max-height: min(420px, 60vh);
   overflow-y: auto;
   overscroll-behavior: contain;

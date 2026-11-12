@@ -95,10 +95,6 @@ import {
   executePeerMessage,
   parseCollaborationGroup,
 } from "./subAgentCollaboration";
-import {
-  createSubAgentBudget,
-  loadSubAgentBudgetLimits,
-} from "./subAgentBudget";
 import { waitForSubAgentCapacity } from "./subAgentCapacity";
 import { logSubAgentDiagnostic } from "./subAgentDiagnostics";
 import {
@@ -130,7 +126,6 @@ import { isSubAgentTerminal } from "../../../../../shared/subAgentRuns";
 import {
   notifySubAgentRunChanges,
   readSubAgentRunResult,
-  retainOwnedSubAgentResourceStop,
   requestOwnedSubAgentRunCancel,
   startOwnedSubAgentRun,
 } from "./subAgentRunRegistry";
@@ -258,7 +253,6 @@ type SubAgentRunLoopDeps = {
   retainedPending: ReadonlySet<PendingQueueItem>;
   takeRunMessages: () => Promise<SubAgentUserMessage[]>;
   runPersistence: SubAgentRunPersistence;
-  budget: ReturnType<typeof createSubAgentBudget>;
   onExecutionError: (error: SubAgentRunError) => void;
 };
 
@@ -401,7 +395,6 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
       stopped = true;
       return false;
     }
-    deps.budget.check();
     while (true) {
       const controller = ctx.pauseControllerRef.current.get(subConvId);
       if (!controller?.paused) return !isSubCancelled();
@@ -424,7 +417,6 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
           }),
       );
       if (isSubCancelled()) return false;
-      deps.budget.check();
     }
   };
 
@@ -459,7 +451,6 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
         thinkingStrength: runtimeConfig.effectiveThinkingStrength,
         responsesFastMode: runtimeConfig.effectiveResponsesFastMode,
         resumeAfterCompaction,
-        beforeCompaction: () => deps.budget.request(),
       });
       if (gateCompaction) {
         if (isSubCancelled()) {
@@ -509,7 +500,6 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
         .join("\n\n");
 
       if (!(await awaitPauseBoundary())) return "Sub-agent interrupted by user";
-      deps.budget.request();
       const subStreamPromise = window.snow.createResponseStream(
         {
           messages: subMessages,
@@ -562,7 +552,6 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
           ),
         );
       }
-      deps.budget.check();
       recordTaskResponse(taskHistory, subConvId, subResponse.id, agentName);
       const subResponseDisposition = resolveResponseDisposition(subResponse);
       const subResponseFailed = subResponseDisposition.kind === "error";
@@ -780,7 +769,6 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
           responsesFastMode: runtimeConfig.effectiveResponsesFastMode,
           tokenUsage: subResponse.tokenUsage,
           beforeCompaction: () => {
-            deps.budget.request();
             ctx.updateSessionMessages(subConvId, (currentMessages) =>
               currentMessages.map((currentMessage) =>
                 currentMessage.id === subAssistantMessageId
@@ -898,7 +886,6 @@ const createSubAgentRunLoop = (deps: SubAgentRunLoopDeps): SubAgentRunLoop => {
         subToolIndex < dispatchToolCalls.length;
         subToolIndex++
       ) {
-        deps.budget.check();
         const subToolCall = dispatchToolCalls[subToolIndex];
         const subAuthorizationDecision =
           subAuthorizationDecisions[subToolIndex];
@@ -1881,10 +1868,9 @@ const stopSubAgentResources = async (
   ctx: ConversationContextValue,
   conversationId: string,
   ownerId: string,
-  markAborted = true,
 ): Promise<void> => {
   const ref = ctx.sessionsRefData.current.get(conversationId);
-  if (ref && markAborted) ref.isAbortRequested = true;
+  if (ref) ref.isAbortRequested = true;
   cancelSubAgentRunWaits(ownerId);
   for (const [id, pending] of ctx.pendingToolAuthorizationRef.current) {
     if (pending.toolCall.authorizationConversationId !== conversationId)
@@ -2244,31 +2230,6 @@ const dispatchPreparedSubAgentRun = async (
   const actual = { ...prepared, conversationId: actualConversationId };
   const state: RunState = { cancelled: false, finalizing: false };
   const capacityAbort = new AbortController();
-  let budgetResourceStop: Promise<void> | undefined;
-  const budget = createSubAgentBudget(
-    {
-      maxModelRequests: snapshot.maxModelRequests ?? 128,
-      maxActiveDurationMs: snapshot.maxActiveDurationMs ?? 30 * 60 * 1000,
-    },
-    (error) => {
-      state.error = runError("model", error.message.split(":", 1)[0], error);
-      capacityAbort.abort();
-      budgetResourceStop = stopSubAgentResources(
-        ctx,
-        actualConversationId,
-        ownerId,
-        false,
-      );
-      // A failed terminal result does not imply that external resources drained cleanly.
-      retainOwnedSubAgentResourceStop(ownerId, budgetResourceStop);
-      void budgetResourceStop.catch((stopError: unknown) => {
-        state.error = {
-          ...state.error!,
-          detail: `Resource stop failed: ${getErrorMessage(stopError)}`,
-        };
-      });
-    },
-  );
   const retainedPending = new Set(
     ctx.pendingQueueRef.current.get(actualConversationId) ?? [],
   );
@@ -2276,13 +2237,11 @@ const dispatchPreparedSubAgentRun = async (
   const cancelled = (): boolean =>
     !state.finalizing &&
     (state.cancelled ||
-      (!budget.error &&
-        Boolean(
-          ctx.sessionsRefData.current.get(actualConversationId)
-            ?.isAbortRequested &&
-          !ctx.sessionsRefData.current.get(actualConversationId)
-            ?.forceSendAbort,
-        )));
+      Boolean(
+        ctx.sessionsRefData.current.get(actualConversationId)
+          ?.isAbortRequested &&
+        !ctx.sessionsRefData.current.get(actualConversationId)?.forceSendAbort,
+      ));
   const publish = (run: SubAgentRunRecord): void => {
     runPersistence.onCommitted(run);
     notifySubAgentRunChanges();
@@ -2327,10 +2286,8 @@ const dispatchPreparedSubAgentRun = async (
     reason,
     action,
   ) => {
-    budget.check();
     if (cancelled())
       throw new Error("RUN_CANCELLED: run was cancelled before decision");
-    budget.pause();
     if (
       !state.finalizing &&
       !(await transition(["running"], "waiting_input", reason))
@@ -2339,14 +2296,13 @@ const dispatchPreparedSubAgentRun = async (
     try {
       return await action();
     } finally {
-      if (!state.finalizing && !cancelled() && !budget.error) {
+      if (!state.finalizing && !cancelled()) {
         if (!cancelled()) {
           const resumed = await transition(["waiting_input"], "running");
           if (!resumed && !cancelled())
             throw new Error(
               "INVALID_TRANSITION: run cannot resume after decision",
             );
-          if (resumed) budget.resume();
         }
       }
     }
@@ -2454,7 +2410,6 @@ const dispatchPreparedSubAgentRun = async (
                   "INVALID_TRANSITION: queued run did not acquire execution ownership",
                 );
             } else {
-              budget.resume();
               ctx.updateSessionField(actualConversationId, "isStreaming", true);
               resetRunStreamMetrics(ctx, actualConversationId);
               markRunStarted(ctx, actualConversationId);
@@ -2492,7 +2447,6 @@ const dispatchPreparedSubAgentRun = async (
                 withWaiting,
                 retainedPending,
                 runPersistence,
-                budget,
                 onExecutionError: (error) => {
                   state.error ??= error;
                 },
@@ -2563,14 +2517,6 @@ const dispatchPreparedSubAgentRun = async (
           }
           summary = lastAssistant?.content || "";
         }
-        budget.pause();
-        if (budgetResourceStop) {
-          try {
-            await budgetResourceStop;
-          } catch (error) {
-            if (state.error) state.error.detail = getErrorMessage(error);
-          }
-        }
         state.cancelled ||= cancelled();
         const result = await finalize(summary);
         finishSubAgentSession(actual, ownerId, state.run!);
@@ -2618,7 +2564,6 @@ const dispatchPreparedSubAgentRun = async (
           )(actualConversationId);
           subAgentSessionOwners.delete(actualConversationId);
         }
-        budget.pause();
         capacityAbort.abort();
         cancelSubAgentRunWaits(ownerId);
         unregisterSubAgentRunControl(ownerId);
@@ -2632,7 +2577,6 @@ const dispatchPreparedSubAgentRun = async (
         );
       state.cancelled = true;
       capacityAbort.abort();
-      budget.pause();
       await stopSubAgentResources(ctx, actualConversationId, ownerId);
     },
   );
@@ -2679,7 +2623,6 @@ const createSubAgentResume =
       runtimeConfig: { ...prepared.runtimeConfig, toolsJson },
       snapshot: {
         ...prepared.snapshot,
-        ...(await loadSubAgentBudgetLimits()),
         toolsJson,
         collaborationGroup: group,
       },
@@ -2833,7 +2776,6 @@ export const createSubAgentActivation = (deps: SubAgentActivationDeps) => {
             operation: "activate",
             runtimeConfig,
             snapshot: {
-              ...(await loadSubAgentBudgetLimits()),
               collaborationGroup: requestInput.collaborationGroup,
               agentId: runtimeConfig.agentId,
               agentName: runtimeConfig.agentName,

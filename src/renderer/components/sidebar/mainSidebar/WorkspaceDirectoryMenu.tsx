@@ -10,6 +10,8 @@ import {
   Link2,
   Loader2,
   Pencil,
+  ServerCog,
+  Terminal,
   Trash2,
   Unlink,
 } from "lucide-react";
@@ -23,6 +25,7 @@ import { ShortcutHint } from "../../ShortcutHint";
 import { FileManagerIcon } from "../../icons/fileManagerIcons";
 import { IdeIcon } from "../../icons/ideIcons";
 import { requestOpenRepoWiki } from "../../repoWiki/repoWikiNavigation";
+import { rightPanelEvents } from "../../rightPanel/rightPanelEvents";
 import {
   getFileManagerLabelKey,
   useOpenWithApps,
@@ -51,6 +54,8 @@ type WorkspaceDirectoryMenuProps = {
   /** 从合集移出（关联成员行菜单项，非成员行不传） */
   onRemoveFromCollection?: () => void;
   onRename?: () => void;
+  /** 编辑远程目录的连接（登录信息 / 端口 / 远程目录），仅 SSH 目录提供 */
+  onEditConnection?: () => void;
   onShowDetails?: () => void;
   /** 查看该项目的迁移记录（含撤销入口） */
   onShowRelinkHistory?: () => void;
@@ -80,6 +85,7 @@ export function WorkspaceDirectoryMenu({
   onOpenChange,
   onRemoveFromCollection,
   onRename,
+  onEditConnection,
   onShowDetails,
   onShowRelinkHistory,
   contextMenuAnchor = null,
@@ -274,6 +280,14 @@ export function WorkspaceDirectoryMenu({
     onContextMenuCloseRef.current?.();
   };
 
+  const handleEditConnectionClick = (): void => {
+    setIsButtonOpen(false);
+    onContextMenuCloseRef.current?.();
+    setShowConfirm(false);
+    setIsOpenWithOpen(false);
+    onEditConnection?.();
+  };
+
   const handleDeleteClick = (): void => {
     setIsButtonOpen(false);
     onContextMenuCloseRef.current?.();
@@ -287,6 +301,21 @@ export function WorkspaceDirectoryMenu({
     setShowConfirm(false);
     setIsOpenWithOpen(false);
     onShowDetails?.();
+  };
+
+  const handleOpenTerminalClick = (): void => {
+    setIsButtonOpen(false);
+    onContextMenuCloseRef.current?.();
+    setShowConfirm(false);
+    setIsOpenWithOpen(false);
+    if (!directoryPath) {
+      return;
+    }
+    // 空命令只新建终端 tab；SSH 目录的 ssh:// 路径由 ptyManager 解析
+    rightPanelEvents.emit("open-terminal-command", {
+      cwd: directoryPath,
+      command: "",
+    });
   };
 
   const handleOpenWikiClick = (): void => {
@@ -545,6 +574,21 @@ export function WorkspaceDirectoryMenu({
                   </span>
                   <ShortcutHint action="openProjectExplorer" />
                 </button>
+                {directoryPath ? (
+                  <button
+                    type="button"
+                    className="workspace-directory-menu-item"
+                    onClick={handleOpenTerminalClick}
+                    role="menuitem"
+                  >
+                    <Terminal size={13} />
+                    <span>
+                      {t("sidebar.explorerOpenInTerminal", {
+                        defaultValue: "Open in Terminal",
+                      })}
+                    </span>
+                  </button>
+                ) : null}
                 {canOpenWith ? (
                   <button
                     type="button"
@@ -586,6 +630,21 @@ export function WorkspaceDirectoryMenu({
                     <span>
                       {t("sidebar.directoryActionRename", {
                         defaultValue: "Rename",
+                      })}
+                    </span>
+                  </button>
+                ) : null}
+                {kind === "ssh" && onEditConnection ? (
+                  <button
+                    type="button"
+                    className="workspace-directory-menu-item"
+                    onClick={handleEditConnectionClick}
+                    role="menuitem"
+                  >
+                    <ServerCog size={13} />
+                    <span>
+                      {t("sidebar.directoryActionEditConnection", {
+                        defaultValue: "Edit connection",
                       })}
                     </span>
                   </button>
