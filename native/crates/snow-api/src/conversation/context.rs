@@ -460,7 +460,10 @@ pub async fn prepare_context_request(
         });
     }
     // 分层增量压缩：压缩指令与历史在会话 id 解析之后按折叠规划生成。
-    let fold_compaction = request.context_compaction && request.context_fold;
+    // 与上下文内核互斥：内核已经决定出站视图，再叠加官方折叠会让两套记账口径
+    // 同时改写同一份请求。
+    let fold_compaction =
+        request.context_compaction && request.context_fold && !request.context_kernel;
     let mut current_messages = if request.resume_after_compaction {
         // Resume after auto-compaction: the handoff is already persisted as
         // the latest `context_compaction` boundary message and will be loaded

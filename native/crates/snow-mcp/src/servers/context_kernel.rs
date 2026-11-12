@@ -26,6 +26,8 @@ use crate::storage::services::chat_conversations::{
     load_context_messages, ChatContextMessage, ORIGIN_INTERNAL,
 };
 
+use self::segments::{split_tool_pair, tool_pair_index, ToolPair};
+
 // ---------------------------------------------------------------------------
 // 上游模块移植（`acp-kernel` 0.0.101）
 // ---------------------------------------------------------------------------
@@ -93,13 +95,13 @@ const MESSAGE_OVERHEAD_TOKENS: i64 = 4;
 /// 上下文内核自身工具的消息永不折叠：模型必须能看到自己压过什么。
 const KERNEL_TOOL_PREFIX: &str = "context-kernel-";
 
-/// 含媒体载荷的消息永久受保护（折叠会丢失图片引用）。
-const MEDIA_MARKERS: &[&str] = &[
-    "@@image:",
-    "data:image/",
-    "\"type\":\"image\"",
-    "\"type\": \"image\"",
-];
+/// 正文里直接可见的媒体标记：用户消息、助手消息、工具结果都可能带。
+const MEDIA_TEXT_MARKERS: &[&str] = &["@@image:", "data:image/"];
+
+/// 只存在于工具结果 JSON 里的结构化图片块（`{"type":"image",...}`）。
+///
+/// 只扫 `tool_results_json`：正文里讨论这段 JSON 时不是图片，不该因此被永久保护。
+const MEDIA_JSON_MARKERS: &[&str] = &["\"type\":\"image\"", "\"type\": \"image\""];
 
 /// 折叠范围自动对齐到「轮」（user 开启新轮，assistant + 其工具调用/结果同轮）。
 const SNAP_TO_TURNS: bool = true;
@@ -735,39 +737,6 @@ fn entry_ids(raw: Option<&str>, keys: &[&str]) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn tool_pair_index(messages: &[ChatContextMessage]) -> HashMap<String, (Option<usize>, Option<usize>)> {
-    let mut pairs: HashMap<String, (Option<usize>, Option<usize>)> = HashMap::new();
-    for (index, message) in messages.iter().enumerate() {
-        match message.role.trim() {
-            "assistant" => {
-                for id in entry_ids(message.tool_calls_json.as_deref(), &["id", "callId"]) {
-                    pairs.entry(id).or_default().0 = Some(index);
-                }
-            }
-            "tool" => {
-                for id in entry_ids(message.tool_results_json.as_deref(), &["callId", "id"]) {
-                    pairs.entry(id).or_default().1 = Some(index);
-                }
-            }
-            _ => {}
-        }
-    }
-    pairs
-}
-
-/// 返回该范围拆开的第一个工具对（用于拒绝非法块）。
-fn split_tool_pair(
-    pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
-    start: usize,
-    end: usize,
-) -> Option<String> {
-    pairs.iter().find_map(|(id, (assistant, tool))| {
-        let call_in = assistant.is_some_and(|index| (start..=end).contains(&index));
-        let result_in = tool.is_some_and(|index| (start..=end).contains(&index));
-        (call_in != result_in).then(|| id.clone())
-    })
-}
-
 /// 消息里出现的工具名（assistant 的 tool_calls / tool 的 tool_results）。
 fn tool_names_of(message: &ChatContextMessage) -> Vec<String> {
     let raw = match message.role.trim() {
@@ -805,11 +774,19 @@ fn tool_names_of(message: &ChatContextMessage) -> Vec<String> {
 
 /// 含媒体载荷：折叠会丢掉图片引用，因此永久受保护。
 pub fn has_media_payload(message: &ChatContextMessage) -> bool {
-    let mut text = message.content.clone();
-    if let Some(raw) = message.tool_results_json.as_deref() {
-        text.push_str(raw);
+    if MEDIA_TEXT_MARKERS
+        .iter()
+        .any(|marker| message.content.contains(marker))
+    {
+        return true;
     }
-    MEDIA_MARKERS.iter().any(|marker| text.contains(marker))
+    let Some(raw) = message.tool_results_json.as_deref() else {
+        return false;
+    };
+    MEDIA_TEXT_MARKERS
+        .iter()
+        .chain(MEDIA_JSON_MARKERS.iter())
+        .any(|marker| raw.contains(marker))
 }
 
 /// 内核自身工具的消息：模型必须能看到自己压过什么，不能折叠。
@@ -1354,7 +1331,7 @@ fn usable_flags(view: &HistoryView, cfg: &KernelConfig) -> Vec<bool> {
 /// 受保护消息，宁可少折也不能给出会被 compress 拒绝的建议区间。
 fn trim_pair_edges(
     messages: &[ChatContextMessage],
-    pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
+    pairs: &[ToolPair],
     mut from: usize,
     mut to: usize,
 ) -> (usize, usize) {
@@ -1365,8 +1342,8 @@ fn trim_pair_edges(
                 .iter()
                 .any(|id| {
                     pairs
-                        .get(id)
-                        .is_some_and(|(call, _)| call.is_some_and(|index| index < from))
+                        .iter()
+                        .any(|pair| &pair.id == id && pair.call.is_some_and(|index| index < from))
                 });
         if unmatched_result {
             from += 1;
@@ -1381,8 +1358,8 @@ fn trim_pair_edges(
                 .iter()
                 .any(|id| {
                     pairs
-                        .get(id)
-                        .is_some_and(|(_, result)| result.is_some_and(|index| index > to))
+                        .iter()
+                        .any(|pair| &pair.id == id && pair.result.is_some_and(|index| index > to))
                 });
         if dangling_call {
             if to == 0 {
@@ -1503,7 +1480,7 @@ pub fn self_test_range_selection() -> Value {
 
     fn describe_range(
         view: &HistoryView,
-        pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
+        pairs: &[ToolPair],
         from: usize,
         to: usize,
     ) -> Value {
@@ -1577,6 +1554,22 @@ pub fn self_test_range_selection() -> Value {
         (low, high)
     };
 
+    // 同 id 复用（宿主修复层与部分 provider 重试会合成重复 call id）：必须按出现
+    // 顺序配对。旧实现让后一次覆盖前一次，首对区间 0..=1 会被误判成拆开工具对。
+    let duplicate_messages = vec![
+        assistant_call("dup"),
+        tool_result("dup"),
+        assistant_call("dup"),
+        tool_result("dup"),
+    ];
+    let duplicate_pairs = tool_pair_index(&duplicate_messages);
+    let duplicate_pair_json: Vec<Value> = duplicate_pairs
+        .iter()
+        .map(|pair| json!({ "id": pair.id, "call": pair.call, "result": pair.result }))
+        .collect();
+    let duplicate_first_splits = split_tool_pair(&duplicate_pairs, 0, 1);
+    let duplicate_cross_splits = split_tool_pair(&duplicate_pairs, 0, 2);
+
     json!({
         "singleTurn": {
             "ranges": single_ranges
@@ -1591,6 +1584,11 @@ pub fn self_test_range_selection() -> Value {
                 .map(|(from, to)| describe_range(&multi_view, &multi_pairs, *from, *to))
                 .collect::<Vec<_>>(),
             "expandForward": [forward_low, forward_high],
+        },
+        "duplicateCallIds": {
+            "pairs": duplicate_pair_json,
+            "firstPairSplits": duplicate_first_splits,
+            "crossPairSplits": duplicate_cross_splits,
         },
     })
 }
@@ -1875,7 +1873,7 @@ pub fn clear_state(database_path: &Path, conversation_id: &str, sub_agent_id: &s
 fn block_ranges(
     state: &KernelState,
     positions: &HashMap<String, usize>,
-    pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
+    pairs: &[ToolPair],
     blocked: &[bool],
 ) -> Vec<(usize, usize, KernelBlock)> {
     let mut ranges: Vec<(usize, usize, KernelBlock)> = Vec::new();
@@ -3048,7 +3046,8 @@ fn execute_status(
         "protected": {
             "pinnedRef": pinned.and_then(|index| view.refs.get(index)).map(|item| item.id.clone()).unwrap_or_default(),
             "tailMessages": cfg.tail_protected_messages,
-            "mediaMarkers": MEDIA_MARKERS,
+            "mediaMarkers": MEDIA_TEXT_MARKERS,
+            "mediaJsonMarkers": MEDIA_JSON_MARKERS,
             "kernelTools": KERNEL_TOOL_PREFIX,
         },
     }))

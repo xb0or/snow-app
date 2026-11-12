@@ -119,7 +119,7 @@ pub fn context_kernel_self_test() -> Result<String> {
     put(
         "adjust_tool_pairs",
         json!({
-            "none": k::segments::adjust_boundaries_for_tool_pairs(&Default::default(), 0, 3),
+            "none": k::segments::adjust_boundaries_for_tool_pairs(&[], 0, 3),
         }),
     );
 

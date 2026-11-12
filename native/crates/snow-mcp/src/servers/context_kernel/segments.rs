@@ -164,22 +164,69 @@ pub fn segment_groups<T: Clone>(items: &[T], gap_before: impl Fn(&T) -> bool, is
 // tool-pairs.ts / reasoning-pairs.ts / turn-integrity.ts
 // ---------------------------------------------------------------------------
 
-/// 依据 `toolCallId` 配对：`callId` → (调用下标, 结果下标)。
-pub fn tool_pair_index(messages: &[ChatContextMessage]) -> HashMap<String, (Option<usize>, Option<usize>)> {
-    let mut pairs: HashMap<String, (Option<usize>, Option<usize>)> = HashMap::new();
+/// 一对工具调用 / 结果。
+///
+/// 同一个 call id 可能被复用（宿主修复层会合成重复 id，部分 provider 重试也会
+/// 复用），因此配对结果是一个列表而不是「一 id 一对」的映射。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolPair {
+    pub id: String,
+    pub call: Option<usize>,
+    pub result: Option<usize>,
+}
+
+/// 依据 `toolCallId` 配对，按出现顺序把第 k 次调用配给第 k 个结果。
+pub fn tool_pair_index(messages: &[ChatContextMessage]) -> Vec<ToolPair> {
+    let mut calls: Vec<(String, usize)> = Vec::new();
+    let mut results: Vec<(String, usize)> = Vec::new();
     for (index, message) in messages.iter().enumerate() {
         match message.role.trim() {
             "assistant" => {
                 for id in tool_call_ids(message) {
-                    pairs.entry(id).or_default().0 = Some(index);
+                    calls.push((id, index));
                 }
             }
             "tool" => {
                 for id in tool_result_ids(message) {
-                    pairs.entry(id).or_default().1 = Some(index);
+                    results.push((id, index));
                 }
             }
             _ => {}
+        }
+    }
+    // 顺序配对：后一次出现的同名调用不能覆盖前一次，否则区间首尾的两条会被
+    // 误判成一对，`split_tool_pair` 于是给出跨整段的假拆分。
+    let mut paired = vec![false; results.len()];
+    let mut pairs = Vec::with_capacity(calls.len().max(results.len()));
+    for (id, call_index) in calls {
+        let matched = results
+            .iter()
+            .enumerate()
+            .find(|(position, (result_id, _))| !paired[*position] && result_id == &id)
+            .map(|(position, (_, result_index))| (position, *result_index));
+        match matched {
+            Some((position, result_index)) => {
+                paired[position] = true;
+                pairs.push(ToolPair {
+                    id,
+                    call: Some(call_index),
+                    result: Some(result_index),
+                });
+            }
+            None => pairs.push(ToolPair {
+                id,
+                call: Some(call_index),
+                result: None,
+            }),
+        }
+    }
+    for (position, (id, result_index)) in results.into_iter().enumerate() {
+        if !paired[position] {
+            pairs.push(ToolPair {
+                id,
+                call: None,
+                result: Some(result_index),
+            });
         }
     }
     pairs
@@ -246,7 +293,7 @@ pub fn tool_names_of(message: &ChatContextMessage) -> Vec<String> {
 /// 把范围边界扩到包含完整的工具调用/结果对（上游 `adjustBoundariesForToolPairs`）。
 /// 返回的区间**只会变宽**。
 pub fn adjust_boundaries_for_tool_pairs(
-    pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
+    pairs: &[ToolPair],
     start: usize,
     end: usize,
 ) -> (usize, usize) {
@@ -255,13 +302,15 @@ pub fn adjust_boundaries_for_tool_pairs(
     // 迭代到不动点：扩进来的调用/结果可能再把别的对拉进来。
     loop {
         let (mut next_low, mut next_high) = (low, high);
-        for (call, result) in pairs.values() {
-            let call_in = call.is_some_and(|index| (low..=high).contains(&index));
-            let result_in = result.is_some_and(|index| (low..=high).contains(&index));
+        for pair in pairs {
+            let call_in = pair.call.is_some_and(|index| (low..=high).contains(&index));
+            let result_in = pair
+                .result
+                .is_some_and(|index| (low..=high).contains(&index));
             if call_in == result_in {
                 continue;
             }
-            for index in [*call, *result].into_iter().flatten() {
+            for index in [pair.call, pair.result].into_iter().flatten() {
                 next_low = next_low.min(index);
                 next_high = next_high.max(index);
             }
@@ -275,15 +324,15 @@ pub fn adjust_boundaries_for_tool_pairs(
 }
 
 /// 范围是否把某个工具对拆开；拆开时返回该对 id（防御：状态过期 / 历史变动）。
-pub fn split_tool_pair(
-    pairs: &HashMap<String, (Option<usize>, Option<usize>)>,
-    start: usize,
-    end: usize,
-) -> Option<String> {
-    pairs.iter().find_map(|(id, (call, result))| {
-        let call_in = call.is_some_and(|index| (start..=end).contains(&index));
-        let result_in = result.is_some_and(|index| (start..=end).contains(&index));
-        (call_in != result_in).then(|| id.clone())
+pub fn split_tool_pair(pairs: &[ToolPair], start: usize, end: usize) -> Option<String> {
+    pairs.iter().find_map(|pair| {
+        let call_in = pair
+            .call
+            .is_some_and(|index| (start..=end).contains(&index));
+        let result_in = pair
+            .result
+            .is_some_and(|index| (start..=end).contains(&index));
+        (call_in != result_in).then(|| pair.id.clone())
     })
 }
 
