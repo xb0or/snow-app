@@ -378,6 +378,43 @@ if (!selection) {
     failures.push(
       `range_selection.multiTurn.expandForward: expected [1,4], got ${JSON.stringify(forward)}`,
     );
+
+  // 同 id 复用（宿主修复层/重试合成重复 call id）：必须按出现顺序配对，
+  // 后一次不能覆盖前一次，否则首对会被误判成拆开工具对。
+  const duplicate = selection.duplicateCallIds;
+  if (!duplicate) {
+    failures.push("range_selection.duplicateCallIds: MISSING from Rust output");
+  } else {
+    const expected = [
+      { call: 0, result: 1 },
+      { call: 2, result: 3 },
+    ];
+    const pairs = duplicate.pairs ?? [];
+    if (pairs.length !== expected.length) {
+      failures.push(
+        `duplicateCallIds.pairs: expected ${expected.length} pairs, got ${JSON.stringify(pairs)}`,
+      );
+    } else {
+      expected.forEach((want, index) => {
+        const got = pairs[index];
+        if (got.call !== want.call || got.result !== want.result) {
+          failures.push(
+            `duplicateCallIds.pairs[${index}]: expected call=${want.call},result=${want.result}, got ${JSON.stringify(got)}`,
+          );
+        }
+      });
+    }
+    if (duplicate.firstPairSplits !== null) {
+      failures.push(
+        `duplicateCallIds.firstPairSplits: expected null, got ${JSON.stringify(duplicate.firstPairSplits)}`,
+      );
+    }
+    if (duplicate.crossPairSplits !== "dup") {
+      failures.push(
+        `duplicateCallIds.crossPairSplits: expected "dup", got ${JSON.stringify(duplicate.crossPairSplits)}`,
+      );
+    }
+  }
 }
 
 if (failures.length > 0) {

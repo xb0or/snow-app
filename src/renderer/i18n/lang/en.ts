@@ -293,6 +293,9 @@ export const en = {
   "sidebar.sshDirectoryInvalid": "SSH directory must start with ssh://",
   "sidebar.sshWizardTitle": "Add SSH Remote Directory",
   "sidebar.sshWizardClose": "Close",
+  "sidebar.sshEditWizardTitle": "Edit SSH Connection",
+  "sidebar.sshEditConnectionSave": "Save connection",
+  "sidebar.sshEditConnectionError": "Failed to update the SSH connection",
   "sidebar.sshStepConnect": "Connect",
   "sidebar.sshStepBrowse": "Browse",
   "sidebar.sshSavedConnections": "Saved connections ({{count}})",
@@ -345,6 +348,7 @@ export const en = {
   "sidebar.directoryDetails": "Browse files",
   "sidebar.directoryActionActivate": "Set as active",
   "sidebar.directoryActionRename": "Rename",
+  "sidebar.directoryActionEditConnection": "Edit connection",
   "sidebar.directoryRenamePlaceholder": "Enter new name",
   "sidebar.renameDirectoryError": "Failed to rename workspace directory",
   "sidebar.sshConfigSection": "Hosts from SSH config ({{count}})",
@@ -864,8 +868,6 @@ export const en = {
   "chat.hook.unknownBlock": "Hook blocked the action",
   "chat.responseFailedFallback":
     "The AI response failed. Please try again later.",
-  "chat.agentLoop.duplicateRecoveryFallback":
-    "(Analysis finished based on the content read earlier — see the tool results and answer above)",
   "chat.agentLoop.goalAutoContinuation": "Goal Mode auto-continuation",
   "chat.subAgentModelFixed":
     "Sub-agent uses the API profile and model resolved when it started",
@@ -2060,6 +2062,7 @@ export const en = {
   "toolNames.bash-terminal-execute": "Terminal",
   "toolNames.todo-todo-manage": "Todo",
   "toolNames.memory-manage": "Manage memory",
+  "toolNames.context-recall": "Recall history",
   "toolNames.grep-search": "grep",
   "toolNames.grep-find": "find",
   "toolNames.terminal-open": "Open terminal",
@@ -2089,10 +2092,6 @@ export const en = {
   "toolCall.decision.type.score": "score",
   "toolNames.workflow-workflow-generate": "Generate workflow",
   "toolNames.workflow-workflow-resume": "Resume workflow",
-  "toolCall.duplicateReadonlyProtection.duplicateCall":
-    "Repeated read aborted: this read-only call was repeatedly requested 3+ times with identical parameters and unchanged state. Aborted to prevent loop. Please proceed using existing context.",
-  "toolCall.duplicateReadonlyProtection.toolsDisabled":
-    "Duplicate-read protection: tools were disabled for this recovery round, but the model still requested a tool call, so nothing was executed.",
   "toolCall.common.fromCache": "Reused",
   "toolCall.common.fromCacheHint":
     "Reused prior result for identical call without re-reading physical file",
@@ -3668,6 +3667,18 @@ export const en = {
     "Conversation messages to send",
   "settings.sensitiveCommandAssistContextCountInfo":
     "Default {{default}}, range {{min}}-{{max}}. More messages give a fuller picture but send more content; whatever exceeds the state budget is truncated from the oldest end.",
+  "settings.sensitiveCommandAssistLearn": "Learn my preferences automatically",
+  "settings.sensitiveCommandAssistLearnInfo":
+    "Off by default. When on, your allow and deny choices in the sensitive command prompt are recorded on this device, including commands the decision model denied but you allowed. Every judgement, whether shown as a suggestion or delegated, sends the most similar records to the decision model so it can follow your past choices.",
+  "settings.sensitiveCommandAssistLearnRecords": "Learned records",
+  "settings.sensitiveCommandAssistLearnRecordsInfo":
+    "{{count}} choices recorded. Up to the latest 1000 are kept; clearing them makes the decision model judge without your history.",
+  "settings.sensitiveCommandAssistLearnRecordsUnknown":
+    "Record count unavailable.",
+  "settings.sensitiveCommandAssistLearnClear": "Clear records",
+  "settings.sensitiveCommandAssistLearnClearTitle": "Clear learned records",
+  "settings.sensitiveCommandAssistLearnClearConfirm":
+    "Delete all {{count}} learned choices? The decision model will no longer see your past decisions.",
   "settings.sensitiveCommandAssistAskOnDenyNeedAssist":
     "Enable decision model assist first.",
   "settings.sensitiveCommandAssistAskOnDenyNeedModel":
@@ -3702,7 +3713,7 @@ export const en = {
   "settings.subAgentSessionConcurrencyLabel":
     "Per-conversation concurrency limit (0 = unlimited)",
   "settings.subAgentSessionConcurrencyHint":
-    "Range 0-2000, default 3; 0 means unlimited, otherwise never above the global limit.",
+    "Range 0-2000, default 0 (unlimited); otherwise never above the global limit.",
   "settings.subAgentConcurrencySaved": "Saved sub-agent concurrency limit.",
   "settings.subAgentConcurrencySaveError":
     "Failed to save sub-agent concurrency limit",
@@ -4754,6 +4765,9 @@ export const en = {
   "plusMenu.toolCorrection": "Auto tool correction",
   "plusMenu.toolCorrectionDescription":
     "Repair failed tool calls and retry automatically",
+  "plusMenu.contextFold": "Incremental compression",
+  "plusMenu.contextFoldDescription":
+    "Fold older messages into layered summaries and keep recent ones; originals stay searchable",
   "plusMenu.yoloMode": "YOLO Mode",
   "plusMenu.yoloModeDescription": "Skip per-tool approval",
   "plusMenu.yoloModeEnabled": "Enabled, no per-tool approval required",
@@ -4846,6 +4860,8 @@ export const en = {
     "No conversation context was available; judged without it",
   "sensitiveCommand.decisionContextDropped":
     "Conversation context exceeded the budget and was dropped; judged without it",
+  "sensitiveCommand.decisionPreferencesUsed":
+    "Considered {{count}} of your past choices on similar commands",
   "sensitiveCommand.severityBadge": "{{level}} risk",
   "sensitiveCommand.severityScore": "Risk score {{value}} / {{max}}",
   "sensitiveCommand.severity.low": "Low",
@@ -5161,6 +5177,8 @@ export const en = {
     "Typed judgments on text, JSON and image evidence with a decision model",
   "mcpBuiltinServer.desc.toolSearch":
     "Automatically follows tool plugins enabled in the project; discover tools on demand without a separate switch",
+  "mcpBuiltinServer.desc.context":
+    "Search and read back messages folded by incremental compression (available while it is enabled)",
   "projectCodebase.title": "Project Codebase",
   "projectCodebase.description": "Codebase indexing for {{project}}",
   "projectCodebase.noProject":
@@ -7329,6 +7347,14 @@ export const en = {
   "repoWiki.noRetry": "No retry",
   "repoWiki.diagrams": "Diagrams",
   "repoWiki.diagramsHint": "Mermaid diagrams backed by source",
+  "repoWiki.diagramsOn": "On",
+  "repoWiki.diagramsOff": "Off",
+  "repoWiki.editSettings": "Edit",
+  "repoWiki.editSettingsTitle": "Edit generation settings",
+  "repoWiki.editSettingsDescription":
+    "Existing pages are kept as they are. Auto updates and page retries use the new settings; use Regenerate to rewrite the whole wiki.",
+  "repoWiki.editSettingsBusy":
+    "Stop the running task before editing the settings",
   "repoWiki.phaseAnalyzing": "Analyzing the codebase",
   "repoWiki.phaseCatalog": "Generating the catalog",
   "repoWiki.phasePages": "Generating pages",

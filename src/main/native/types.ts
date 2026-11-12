@@ -1175,6 +1175,8 @@ export type SensitiveCommandDecisionRecord = {
   contextTruncated?: boolean;
   /** 开关打开但没有可用上下文，按无上下文判定。 */
   contextEmpty?: boolean;
+  /** 偏好学习：本次判定附带的相似历史选择条数。 */
+  preferenceRecords?: number;
   /** 决策模型不可用（未选择 / 已停用 / 配置不完整 / 请求失败）的原因；此时回退人工确认。 */
   error?: string | null;
 };
@@ -1829,6 +1831,8 @@ export type ResponsesApiRequest = {
   analysisWorkspaceRoot?: string;
   checkpointId?: string;
   contextCompaction?: boolean;
+  /** 与 contextCompaction 同时为 true：分层增量压缩（只折叠较早的消息区间）。 */
+  contextFold?: boolean;
   /**
    * Internal auto-compaction resume mode: the compaction handoff is already
    * persisted as the latest `context_compaction` boundary, so `messages` is a
@@ -1858,9 +1862,7 @@ export type ResponsesApiRequest = {
    * skip-context request treats image tags as plain text.
    */
   parseInlineImages?: boolean;
-  /** Preserve normal conversation context but omit MCP tools for this request. */
-  disableTools?: boolean;
-  /** Request-local recovery instruction. Never persisted as a chat message. */
+  /** Request-local system instruction (sub-agent execution policy). Never persisted. */
   internalRecoveryPrompt?: string;
   goalMode?: boolean;
   worktreeMode?: boolean;
@@ -2111,6 +2113,15 @@ export type RepoWikiEvent = {
 export type RepoWikiStartOptions = {
   projectPath: string;
   projectName?: string;
+  language: string;
+  apiProfile?: string;
+  model?: string;
+  diagrams: boolean;
+  retries: number;
+};
+
+export type RepoWikiSettingsOptions = {
+  projectPath: string;
   language: string;
   apiProfile?: string;
   model?: string;
@@ -2559,6 +2570,8 @@ export type NativeBridge = ImageGenerationNativeApi & {
   setAutoFormat: (enabled: boolean) => Promise<void>;
   getToolCorrection: () => Promise<boolean>;
   setToolCorrection: (enabled: boolean) => Promise<void>;
+  getContextFold: () => Promise<boolean>;
+  setContextFold: (enabled: boolean) => Promise<void>;
   /** 退出前落盘尚未执行的延迟自动格式化。 */
   flushPendingFileFormats: () => Promise<void>;
   getConversationModes: (
@@ -3067,6 +3080,12 @@ export type NativeBridge = ImageGenerationNativeApi & {
     conversationContext?: string,
     matchedRulesJson?: string,
   ) => Promise<SensitiveCommandDecisionRecord | null>;
+  /** 偏好学习：记录用户在拦截提示中的选择（JSON）；开关未开启时返回 false。 */
+  recordSensitiveCommandFeedback: (feedbackJson: string) => Promise<boolean>;
+  /** 偏好学习：已记录条数。 */
+  getSensitiveCommandFeedbackCount: () => Promise<number>;
+  /** 偏好学习：清空记录，返回删除条数。 */
+  clearSensitiveCommandFeedback: () => Promise<number>;
   /** 决策 / 嵌入 / 重排模型连接自检：结果持久化并返回，失败写入系统日志。 */
   testDecisionModelConnection: (
     input: DecisionModelTestInput,
@@ -3378,6 +3397,7 @@ export type NativeBridge = ImageGenerationNativeApi & {
     projectPath: string,
     enabled: boolean,
   ) => Promise<void>;
+  repoWikiUpdateSettings: (options: RepoWikiSettingsOptions) => Promise<void>;
   repoWikiNotifyTurnEnded: (projectPath: string) => Promise<boolean>;
   repoWikiFilePath: (projectPath: string) => string;
   /** Registers the SSH remote-command dispatcher used by checkpoint APIs. */

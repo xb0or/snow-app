@@ -146,6 +146,9 @@ export const ChatInputView = ({
   toolCorrectionEnabled,
   onToolCorrectionChange,
   onRefreshToolCorrection,
+  contextFoldEnabled,
+  onContextFoldChange,
+  onRefreshContextFold,
   isCompacting,
   setManualValue,
   setIsManualMode,
@@ -726,8 +729,6 @@ export const ChatInputView = ({
       isStreaming,
       disabled: isSubAgentConversation,
       value,
-      apiProfile: selectedApiProfile || undefined,
-      messages,
     },
   );
   // 回滚目标列表优先接管按键：列表打开时 ↑/↓/Enter/Esc 不再触达输入区逻辑
@@ -1194,6 +1195,9 @@ export const ChatInputView = ({
             toolCorrectionEnabled={toolCorrectionEnabled}
             onToolCorrectionChange={onToolCorrectionChange}
             onRefreshToolCorrection={onRefreshToolCorrection}
+            contextFoldEnabled={contextFoldEnabled}
+            onContextFoldChange={onContextFoldChange}
+            onRefreshContextFold={onRefreshContextFold}
             handleAbort={handleAbort}
             handleSend={handleSend}
             apiConfigs={apiConfigs}
