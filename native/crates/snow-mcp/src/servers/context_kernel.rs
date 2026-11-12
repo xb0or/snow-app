@@ -81,7 +81,7 @@ const PREVIEW_CHARS: usize = 160;
 /// `minToolTokens = 4000` **token** ≈ 16000 字符。此前移植成了无条件开启 +
 /// 4000 字符，等于比上游激进 4 倍还抢走了 tier-1 折叠的全部原料（所有大工具
 /// 输出先被移出视图，折叠永远无米下锅）。
-const CCR_MIN_CHARS: usize = 16_000;
+const CCR_MIN_CHARS: usize = 8_000;
 const CCR_PREVIEW_CHARS: usize = 240;
 const CCR_STORE_MAX_CHARS: usize = 400_000;
 const CCR_MARKER: &str = "[context-kernel:stored";
@@ -297,17 +297,21 @@ pub struct CcrSettings {
     pub exclude_tools: Vec<String>,
     pub max_head_chars: usize,
     pub retrieve_inline_tokens: i64,
+    /// 最近几条工具结果保持内联：刚拿到的输出必须直接可见，否则每轮都要先
+    /// retrieve 才能继续，往返次数反而上升。
+    pub keep_recent: usize,
 }
 
 impl Default for CcrSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             tool_name: "acp_retrieve".to_string(),
-            min_tool_tokens: 4_000,
+            min_tool_tokens: 2_000,
             exclude_tools: Vec::new(),
             max_head_chars: 96,
             retrieve_inline_tokens: 4_000,
+            keep_recent: 2,
         }
     }
 }
@@ -917,10 +921,19 @@ fn ccr_placeholder(ref_id: &str, kind: &str, text: &str) -> String {
     )
 }
 
-fn store_original(state: &mut KernelState, kind: &str, text: &str, max_chars: usize) -> String {
+/// 存入原文并返回 `(ref, 是否新增)`。
+///
+/// 第二个返回值用来区分「这次请求真的改了状态」与「占位符已存在、只是重新渲染」：
+/// 出站视图每请求重建，若按替换条数判定就会每请求写一次库（store 里全是原文）。
+fn store_original(
+    state: &mut KernelState,
+    kind: &str,
+    text: &str,
+    max_chars: usize,
+) -> (String, bool) {
     let ref_id = ccr_ref(text);
     if state.store.contains_key(&ref_id) {
-        return ref_id;
+        return (ref_id, false);
     }
     state.store.insert(
         ref_id.clone(),
@@ -939,7 +952,7 @@ fn store_original(state: &mut KernelState, kind: &str, text: &str, max_chars: us
         };
         state.store.remove(&oldest);
     }
-    ref_id
+    (ref_id, true)
 }
 
 /// 把超长工具结果替换为占位符 / 类型化压缩视图。只改出站副本，落库内容不动。
@@ -952,14 +965,28 @@ fn apply_ccr(
     messages: &mut [ChatContextMessage],
     state: &mut KernelState,
     cfg: &KernelConfig,
-) -> usize {
-    // 上游 `DEFAULT_CCR_CONFIG.enabled = false`：CCR 是**可选**的大结果外置通道，
-    // 不是默认行为。关闭时大工具结果保持内联，成为 tier-1 折叠的原料。
-    if !cfg.ccr.enabled {
-        return 0;
+    tools_available: bool,
+) -> (usize, bool) {
+    // 外置依赖 `context-kernel-retrieve` 才能取回原文：工具不可用时保持内联，
+    // 否则模型拿到占位符却没有任何取回手段。
+    if !cfg.ccr.enabled || !tools_available {
+        return (0, false);
     }
+    // 最近 N 条工具结果保持内联（按出现顺序取尾部）。
+    let mut tool_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.role.trim() == "tool")
+        .map(|(index, _)| index)
+        .collect();
+    let keep = cfg.ccr.keep_recent.min(tool_indices.len());
+    let kept: HashSet<usize> = tool_indices.split_off(tool_indices.len() - keep).into_iter().collect();
     let mut replaced = 0usize;
-    for message in messages.iter_mut() {
+    let mut stored = false;
+    for (index, message) in messages.iter_mut().enumerate() {
+        if kept.contains(&index) {
+            continue;
+        }
         if message.role.trim() != "tool" {
             continue;
         }
@@ -971,7 +998,9 @@ fn apply_ccr(
             && message.content.chars().count() >= cfg.ccr_min_chars
         {
             let original = message.content.clone();
-            let ref_id = store_original(state, "tool_text", &original, cfg.ccr_store_max_chars);
+            let (ref_id, inserted) =
+                store_original(state, "tool_text", &original, cfg.ccr_store_max_chars);
+            stored |= inserted;
             message.content = ccr_view(&ref_id, "tool_text", &original, cfg);
             replaced += 1;
         }
@@ -996,7 +1025,9 @@ fn apply_ccr(
             if result.starts_with(CCR_MARKER) || result.chars().count() < cfg.ccr_min_chars {
                 continue;
             }
-            let ref_id = store_original(state, "tool_result", &result, cfg.ccr_store_max_chars);
+            let (ref_id, inserted) =
+                store_original(state, "tool_result", &result, cfg.ccr_store_max_chars);
+            stored |= inserted;
             entry["result"] = Value::String(ccr_view(&ref_id, "tool_result", &result, cfg));
             changed = true;
             replaced += 1;
@@ -1005,7 +1036,7 @@ fn apply_ccr(
             message.tool_results_json = Some(value.to_string());
         }
     }
-    replaced
+    (replaced, stored)
 }
 
 /// 出站占位文本：小结果用纯占位（省 token），超大结果先做类型化压缩（保信息）。
@@ -2148,10 +2179,14 @@ pub fn apply_outgoing_view(
 
     let (mut folded, mut tokens) = fold(messages, &state, &cfg);
     // CCR：超长工具结果在出站视图里换成冻结占位符，原文进入 content store。
-    if apply_ccr(&mut folded, &mut state, &cfg) > 0 {
-        changed = true;
+    let (ccr_replaced, ccr_stored) = apply_ccr(&mut folded, &mut state, &cfg, tools_available);
+    if ccr_replaced > 0 {
         // 占位符会显著缩小出站体积，nudge 判断必须用压缩后的估算。
         tokens = folded.iter().map(estimate_message_tokens).sum();
+    }
+    // 只有真的新增了 store 条目才需要落库：稳态下占位符逐字节相同，写库是纯放大。
+    if ccr_stored {
+        changed = true;
     }
     // crush：类型化确定性压缩（视图专用、每轮字节一致）。默认关闭。
     if cfg.crush.enabled {
@@ -2836,7 +2871,9 @@ fn execute_cache(
     let (folded, folded_tokens) = fold(&view.messages, &state, &cfg);
     let mut preview = folded.clone();
     let mut state_preview = state.clone();
-    let outbound_tokens = if apply_ccr(&mut preview, &mut state_preview, &cfg) > 0 {
+    // 模型正在调用内核工具，说明工具可用：预览与真实出站视图保持同口径。
+    let (ccr_replaced, _) = apply_ccr(&mut preview, &mut state_preview, &cfg, true);
+    let outbound_tokens = if ccr_replaced > 0 {
         preview.iter().map(estimate_message_tokens).sum()
     } else {
         folded_tokens
@@ -2922,7 +2959,8 @@ fn execute_status(
     prune_stale_blocks(&mut state, &view.positions);
     let (mut folded, mut folded_tokens) = fold(&view.messages, &state, &cfg);
     // 状态里的 token 估算与出站预览都必须是「真实出站字节」：就地应用 CCR/crush。
-    if apply_ccr(&mut folded, &mut state, &cfg) > 0 {
+    // 模型正在调用内核工具，说明工具可用，外置口径与真实请求一致。
+    if apply_ccr(&mut folded, &mut state, &cfg, true).0 > 0 {
         folded_tokens = folded.iter().map(estimate_message_tokens).sum();
     }
     let covered = covered_lookup(&state);
@@ -3009,6 +3047,14 @@ fn execute_status(
 
     let threshold = threshold_tokens.filter(|value| *value > 0);
     let observed = latest_usage_tokens(database_path, conversation_id);
+    let effective_tokens = folded_tokens.max(observed.unwrap_or(0));
+    let raw_tokens = view.total_tokens();
+    // 当前视图相对原始历史的压缩比：0 = 原样发出，1 = 全部折叠/外置。
+    let saved_ratio = if raw_tokens > 0 {
+        1.0 - (folded_tokens as f64 / raw_tokens as f64).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let tokens_saved_by_folding: i64 = blocks_json
         .iter()
         .map(|block| block.get("tokensSaved").and_then(Value::as_i64).unwrap_or(0))
@@ -3022,10 +3068,13 @@ fn execute_status(
         "outboundMessages": folded.len(),
         "estimatedTokens": folded_tokens,
         "observedTokens": observed,
-        "rawTokens": view.total_tokens(),
+        "rawTokens": raw_tokens,
         "tokensSavedByFolding": tokens_saved_by_folding,
+        "savedRatio": saved_ratio,
         "thresholdTokens": threshold,
-        "compressNeeded": threshold.map(|value| folded_tokens.max(observed.unwrap_or(0)) >= value).unwrap_or(false),
+        "budgetTokens": threshold,
+        "overBudget": threshold.map(|value| effective_tokens > value).unwrap_or(false),
+        "compressNeeded": threshold.map(|value| effective_tokens >= value).unwrap_or(false),
         "compressedMessages": covered.len(),
         "activeBlocks": blocks_json.len(),
         "highestTier": highest_tier,
